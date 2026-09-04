@@ -1,0 +1,156 @@
+- id: "1"
+  title: Project skeleton and dataset ingest with quality flags
+  description: >-
+    Stand up the service skeleton and implement CAP-1: load cab, nodal, and shuttle
+    trip logs into one trip-level fact set via a declared column mapping, flagging
+    incomplete records rather than dropping them.
+  invoke_dev_with: >-
+    The sample dataset has not been received. Drive ingest from a declared column
+    mapping file so a real schema can be attached without code changes, and ship a
+    synthetic generator matching the shape described in metric-catalog.md so every
+    later story has data to run against. Emit the per-flag and per-file load summary
+    CAP-1 is tested on. Every fact row carries tenant_id.
+
+- id: "2"
+  title: Metric catalog and semantic layer
+  description: >-
+    Implement CAP-2: a versioned, declarative metric catalog compiled to SQL, exposing
+    the single path to any number. Covers the timeliness, cost, safety, utilisation,
+    sustainability, experience, and vendor families.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    This is the load-bearing interface for the whole system - every later story
+    resolves numbers through it. Enforce min_sample so under-sampled grains return
+    insufficient_sample rather than a number. No caller may reach the fact store
+    except through this layer.
+
+- id: "3"
+  title: Benchmark engine and MetricObservation contract
+  description: >-
+    Implement CAP-3: attach trend, SLA, peer, and industry references to every metric
+    value, emitting the MetricObservation defined in metric-catalog.md. Completes L0.
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Each of the four reference types is either populated or explicitly unavailable
+    with a reason - never silently absent. This is the mandatory contextualisation
+    requirement, so it must hold for every emitted metric, not just the demo ones.
+
+- id: "4"
+  title: Anomaly detection and candidate ranker
+  description: >-
+    Implement CAP-4: robust z-score and EWMA detection with day-of-week awareness,
+    then the deterministic ranker that decides which movements deserve human attention.
+  invoke_dev_with: >-
+    Use median and MAD, not mean and standard deviation - this data is full of
+    outliers. The actionability term in the ranking formula is what prevents an alert
+    firehose; do not drop it. Include the synthetic-degradation test from CAP-4.
+
+- id: "5"
+  title: Attribution engine - mix-rate variance decomposition
+  description: >-
+    Implement CAP-5: decompose a period-over-period rate movement into per-entity rate
+    and mix contributions across vendor, route, shift, and site. Completes L1.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    This is the differentiator - it produces the sentence the brief asks for. The
+    formulas are in metric-catalog.md. Assert that contributions sum to the observed
+    delta within tolerance; that reconciliation is the acceptance test and the reason
+    the output is auditable.
+
+- id: "6"
+  title: Agent memory and incident store
+  description: >-
+    Persist incidents, suppressions, scheduled follow-ups, and feedback, and wire
+    suppression back into the candidate ranker. Foundation for CAP-6 and CAP-11.
+  invoke_dev_with: >-
+    Postgres. The suppression feedback path into the ranker is the part that matters -
+    without it the system cannot get quieter as the operator teaches it.
+
+- id: "7"
+  title: Triage agent
+  description: >-
+    Implement CAP-6: one batched cheap-tier call per run that clusters related
+    candidates, dedupes against open incidents, applies suppressions, and promotes
+    only what warrants a human.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    One batched call for the whole candidate set, never one per anomaly - this is a
+    named cost lever. Input is ranked JSON only, never raw trip rows. The idempotency
+    test in CAP-6 (second run on unchanged data raises no duplicate) is the acceptance
+    criterion.
+
+- id: "8"
+  title: Reasoning agent, tool surface, and numeric validator
+  description: >-
+    Implement CAP-7: strong-tier causal explanation over the metric-layer tool surface,
+    plus the post-generation validator that rejects any number absent from the
+    supplied observations.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    Build the tool surface listed in agents.md - agents call functions, never SQL.
+    The numeric validator is a hard requirement, not a nice-to-have: it is what makes
+    the "LLM never computes a number" constraint enforceable rather than aspirational.
+    On rejection, retry naming the offending figure.
+
+- id: "9"
+  title: Narrative agent and persona rendering
+  description: >-
+    Implement CAP-8: render one incident or reporting period for all three personas
+    from a single pipeline, with persona as a parameter.
+  invoke_dev_with: >-
+    The transport and facilities head rendering must clear the six-point
+    forwardable-without-rework bar in personas.md - that list is the acceptance
+    checklist and it targets a bonus criterion. Data-quality caveats appear inline in
+    the prose, never as a footnote.
+
+- id: "10"
+  title: Scheduled proactive run
+  description: >-
+    Implement CAP-9: wire ingest through triage, reasoning, narrative, and delivery
+    into a scheduled end-to-end cycle that runs with no human in the loop. Completes L2.
+  done_checkpoint: true
+  invoke_dev_with: >-
+    After this story every mandatory requirement in the brief is satisfied and the
+    prototype is demo-able end to end. Confirm it runs on a laptop with no cloud
+    dependency beyond the LLM API before moving on.
+
+- id: "11"
+  title: Action agent and follow-up loop
+  description: >-
+    Implement CAP-11: choose channel, persona, and escalation level, record the action,
+    and schedule a recovery check that self-escalates when the metric has not recovered.
+  invoke_dev_with: >-
+    The follow-up loop is what makes this agentic rather than a one-shot report - do
+    not cut it under time pressure. Escalations are recorded or simulated, never
+    delivered to real vendors.
+
+- id: "12"
+  title: Cost and latency telemetry
+  description: >-
+    Implement CAP-13: emit token counts, model tier, and wall-clock per stage for each
+    run, plus the documented projection to a stated trips-per-day tenant volume.
+  invoke_dev_with: >-
+    This exists so the cost story is demonstrated live rather than asserted on a
+    slide - it directly serves a 20-point criterion most entries ignore. Verify prompt
+    caching is actually hitting on the static prefix and report the hit rate.
+
+- id: "13"
+  title: Conversational agent
+  description: >-
+    Implement CAP-10: map natural-language questions onto metric-layer calls, returning
+    answers with reference context attached.
+  invoke_dev_with: >-
+    Route to the metric layer, never generate SQL over raw tables. An unsupported
+    question is declined, not guessed. Numbers must match the metric layer exactly for
+    the same grain and period.
+
+- id: "14"
+  title: Angular console and leadership brief export
+  description: >-
+    Implement CAP-12: incident list, drill-down into evidence and attribution, trend
+    view, and dismiss/escalate controls, plus export of the leadership brief.
+  invoke_dev_with: >-
+    Dismissal must write a suppression that the ranker honours on the next run - a
+    cosmetic dismiss fails CAP-12. Keep this last; it is polish over a system that
+    already works headless.

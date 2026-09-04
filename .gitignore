@@ -1,0 +1,49 @@
+# BMAD — personal, machine-local overrides (never committed)
+_bmad/custom/config.user.toml
+_bmad/config.user.toml
+
+# BMAD generated artifacts — uncomment to keep them out of the repo
+# _bmad-output/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Java / Maven / Gradle
+target/
+build/
+.gradle/
+*.class
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# Data — sample dataset is large / not ours to redistribute
+data/raw/
+data/processed/
+*.csv
+*.parquet
+*.sqlite
+!data/samples/*.csv
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.iml
+
+# BMAD framework internals — tooling, not product
+.claude/
+_bmad/
