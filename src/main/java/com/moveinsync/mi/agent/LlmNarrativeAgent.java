@@ -152,8 +152,16 @@ public class LlmNarrativeAgent implements NarrativePort {
 
                 If an action is not permitted, say so and say why — do not present it as available.
 
-                For facilities_head the result must be self-contained and forwardable to leadership \
-                without editing: no system jargon, no metric ids, no internal identifiers in the prose.
+                NO INTERNAL VOCABULARY, for any persona. The payload keys are field names, not words: \
+                never write robust_z, rate_effect, mix_effect, severity bands like SLA-NONE-000, \
+                metric ids like cost_per_trip, or dimension names like trip_direction or shift_type. \
+                Write what they mean — "the morning pickups", "the trips themselves got slower", \
+                "well outside its normal month-to-month range". This was previously required only of \
+                facilities_head, which was the wrong reading: the transport manager is not a systems \
+                engineer either, and the line manager least of all.
+
+                For facilities_head the result must additionally be self-contained and forwardable to \
+                leadership without editing — no internal identifiers, and no reference to this tool.
 
                 HARD CONSTRAINT: every number you write must appear verbatim in the payload above. \
                 Never compute, derive, average or re-round anything.""");

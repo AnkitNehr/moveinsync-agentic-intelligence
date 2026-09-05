@@ -186,6 +186,14 @@ public class LlmReasoningAgent implements ReasoningPort {
                 Be specific about what a human should do differently tomorrow. Distinguish causes \
                 that need different remedies.
 
+                WRITE FOR A READER WHO HAS NEVER SEEN THIS SYSTEM. The keys in the payload are \
+                internal field names, not vocabulary: never write rate_effect, mix_effect, robust_z, \
+                metric ids like cost_per_trip, or dimension names like trip_direction in your prose. \
+                Say "the trips themselves got slower" rather than "rate_effect was -2.41", "the \
+                morning/evening split" rather than "trip_direction", and "a far bigger swing than \
+                this normally moves" rather than quoting a z-score. A statistic the reader cannot \
+                interpret is not evidence to them; it is a request that they trust you.
+
                 HARD CONSTRAINT: every number in your prose must appear verbatim in the payload above. \
                 Do not add, derive, average, round differently, or estimate any figure. If you want to \
                 say something you cannot support with a supplied number, say it qualitatively instead.""");

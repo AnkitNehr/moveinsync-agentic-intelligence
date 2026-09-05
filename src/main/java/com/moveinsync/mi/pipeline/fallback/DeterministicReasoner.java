@@ -148,8 +148,20 @@ public class DeterministicReasoner implements ReasoningPort {
 
         Trend trend = references.trend();
         if (trend != null && trend.robustZ() != null && Double.isFinite(trend.robustZ())) {
-            String claim = "Measured against this series' own history the move is %.1f robust z."
-                    .formatted(trend.robustZ());
+            // Stated as a comparison rather than as a statistic. The reader needs to know how unusual
+            // this is; "3.2 robust z" answers that only for someone who already knows the units.
+            // Three bands, not two. The earlier version had no lower bound, so a finding admitted by
+            // the material-delta route rather than the z route — AnomalyScanner.significant permits
+            // exactly that — could carry z = 0.3 and still be described as "larger than usual". That
+            // is a false claim where the text it replaced (the literal z) was at least accurate, and
+            // it disagreed with the sibling ladder in BuiltInChatRouter about the same score.
+            double z = Math.abs(trend.robustZ());
+            String claim = z >= 3
+                    ? "This is far outside what this measure normally does month to month."
+                    : z >= 2
+                            ? "This is a larger move than this measure usually makes month to month."
+                            : "This sits within what this measure normally does month to month; it "
+                                    + "is surfaced for the size of the movement, not its rarity.";
             prose.append(claim).append(' ');
             evidence.add(new Evidence(claim, lead.metricId(), lead.entity()));
         }

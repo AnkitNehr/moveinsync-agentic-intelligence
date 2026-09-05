@@ -131,8 +131,29 @@ public class DeterministicTriage implements TriagePort {
         }
 
         if (Double.isFinite(lead.robustZ()) && Math.abs(lead.robustZ()) >= NOTABLE_Z) {
-            reason.append("The %s move is %.1f robust z against this series' own history, so it is a break from the pattern rather than normal variation. "
-                    .formatted(format.delta(lead.metricId(), lead.deltaPts()), Math.abs(lead.robustZ())));
+            // The z-score decides whether this line prints; it does not appear in it. "2.9 robust z"
+            // is the statistic that justifies the claim, but a transport manager reading an alert at
+            // 07:00 cannot act on a z-score and should not have to look one up. What they need is
+            // the claim itself — this is bigger than this series normally moves — which is what the
+            // number means and all it is being used to assert here.
+            // Qualitative on purpose, and self-contained on purpose.
+            //
+            // An earlier version quantified this as "%s against a typical month-to-month move of
+            // about %s", deriving the second figure as |delta| / |z|. That is not the spread it
+            // claimed to be: robustZ is 0.6745 * (value - median) / mad, so inverting it drops the
+            // scale factor, and AnomalyScanner may score the CROSS-SECTIONAL z — the spread across
+            // sibling entities in one period — in which case the quotient describes peer variation
+            // and not history at all. It rendered a plausible, checkable-looking number that was
+            // wrong, in the one sentence whose job is to justify the alert. Removing jargon is not
+            // worth inventing a statistic to do it; if a dispersion figure belongs here, the scanner
+            // must carry the real one onto Finding rather than have this class reconstruct it.
+            //
+            // It also leads the paragraph whenever no SLA target exists, so it cannot open with
+            // "That" — for cost per trip and occupancy there is no preceding sentence to refer to.
+            reason.append(("%s is a much bigger swing than this measure normally makes from one month "
+                            + "to the next, so it is a genuine break in the pattern rather than "
+                            + "ordinary variation. ")
+                    .formatted(format.delta(lead.metricId(), lead.deltaPts())));
         } else {
             reason.append("Moved %s period over period across %,d trips. ".formatted(
                     format.delta(lead.metricId(), lead.deltaPts()), lead.sampleSize()));
