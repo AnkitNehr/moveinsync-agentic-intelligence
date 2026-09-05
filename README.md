@@ -91,7 +91,7 @@ ls data/raw/
 #   emp_Data.csv                   trip_feedback.csv
 
 # 1. Backend on :8080
-export ANTHROPIC_API_KEY=sk-...        # OPTIONAL — or GEMINI_API_KEY / SARVAM_API_KEY
+export ANTHROPIC_API_KEY=sk-...        # OPTIONAL — or GEMINI_API_KEY / SARVAM_API_KEY / NVIDIA_API_KEY
 mvn spring-boot:run
 
 # 2. Frontend on :4200 (separate terminal)
@@ -147,7 +147,7 @@ docker compose down
 
 ### Running without a key
 
-`ANTHROPIC_API_KEY` (or `GEMINI_API_KEY` / `SARVAM_API_KEY`) is genuinely optional. Every agentic stage sits behind a port
+`ANTHROPIC_API_KEY` (or `GEMINI_API_KEY` / `SARVAM_API_KEY` / `NVIDIA_API_KEY`) is genuinely optional. Every agentic stage sits behind a port
 (`TriagePort`, `ReasoningPort`, `NarrativePort`, `ChatPort`) with a deterministic implementation
 in `pipeline/fallback/`. With no key the pipeline still ingests, computes, benchmarks, detects,
 attributes, applies policy, opens incidents, schedules follow-ups and renders a templated brief —
@@ -363,7 +363,7 @@ five business units are running side by side in the demo data today.
 │   ├── policy/       SlaPolicy · ActionGuard
 │   ├── incident/     IncidentStore · FollowUpScheduler · Suppression   ← memory
 │   ├── agent/        Triage · Reasoning · Narrative + guard/NumericValidator
-│   ├── llm/          ClaudeClient · GeminiClient · SarvamClient · ModelClientRouter
+│   ├── llm/          ClaudeClient · GeminiClient · SarvamClient · NimClient · ModelClientRouter
 │   ├── pipeline/     SenseReasonActPipeline · CadenceScheduler · spi/ · fallback/
 │   ├── audit/        AuditLog — what, why, who was told, what it cost
 │   └── controller/   7 REST endpoints

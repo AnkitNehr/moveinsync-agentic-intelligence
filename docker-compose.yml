@@ -16,6 +16,8 @@ services:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       SARVAM_API_KEY: ${SARVAM_API_KEY:-}
       SARVAM_SUBSCRIPTION_KEY: ${SARVAM_SUBSCRIPTION_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NGC_API_KEY: ${NGC_API_KEY:-}
       JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75.0}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
