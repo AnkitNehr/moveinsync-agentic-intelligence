@@ -237,7 +237,20 @@ public final class BuiltInChatRouter implements ChatPort {
 
         String metricId = resolveMetric(normalised);
         if (metricId == null) {
-            log.info("Declining chat question: no catalog metric resolved from '{}'", question);
+            // Last resort before refusing: if the question names something the fact store knows —
+            // a vendor, an office, a contract — answer about that, whatever else the sentence said.
+            //
+            // Keyword resolution will always have a tail it does not recognise, and the useful
+            // question is what to do with that tail. Declining teaches the user only that they
+            // guessed the wrong words. Naming their subject back with everything measured about it
+            // is nearly always closer to what they wanted, and it is still every figure computed by
+            // the metric layer rather than a guess at their meaning.
+            Answer profile = entityProfileAnswer(normalised, defaultPeriod);
+            if (profile != null) {
+                log.info("No metric resolved from '{}'; answered with the named entity's profile", question);
+                return profile;
+            }
+            log.info("Declining chat question: no catalog metric or known entity in '{}'", question);
             return Answer.decline(question, catalog.labels());
         }
 
