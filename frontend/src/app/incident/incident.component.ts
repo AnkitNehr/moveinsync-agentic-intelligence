@@ -15,6 +15,7 @@ import { GlossaryService } from '../core/glossary.service';
 import type {
   Action,
   AttributionView,
+  ChatResponse,
   Contribution,
   GlossaryMetric,
   Incident,
@@ -86,10 +87,8 @@ interface WaterfallRow {
     } @else if (error()) {
       <section class="panel"><p class="error">{{ error() }}</p></section>
     } @else if (!incident()) {
-      <section class="panel"><p class="hint">Loading incident…</p></section>
+      <section class="panel"><p class="hint">Loading incident...</p></section>
     } @else {
-      <!-- Angular only permits an "as" binding on a primary @if, never on an
-           @else if — so the alias is opened in a nested primary block here. -->
       @if (incident(); as inc) {
 
       <!-- ============ header ============ -->
@@ -98,9 +97,33 @@ interface WaterfallRow {
         <div class="head-body">
           <div class="row1">
             <span class="sev" [style.color]="severityColor(inc.severity)">{{ inc.severity }}</span>
-            <span class="tag num">Priority {{ inc.priority }}</span>
-            <span class="tag mono">{{ inc.id }}</span>
-            <span class="tag">{{ inc.status }}</span>
+
+            <span class="tag num priority-tag">
+              Priority {{ inc.priority }}
+              <span class="prio-bar-wrap">
+                <span class="prio-bar"
+                  [style.width]="priorityPct(inc.priority) + '%'"
+                  [style.background]="priorityBarColor(inc.priority)">
+                </span>
+              </span>
+            </span>
+
+            <span class="tag mono id-tag">
+              {{ inc.id }}
+              <button class="copy-btn"
+                [title]="copied() ? 'Copied!' : 'Copy ID'"
+                (click)="copyId(inc.id)">
+                {{ copied() ? '&#10003;' : '&#128279;' }}
+              </button>
+            </span>
+
+            <span class="status-chip" [attr.data-status]="inc.status">
+              {{ statusIcon(inc.status) }} {{ inc.status }}
+            </span>
+
+            <span class="badge-findings">
+              {{ inc.findingIds.length }} finding{{ inc.findingIds.length === 1 ? '' : 's' }}
+            </span>
           </div>
           <h1>{{ inc.title }}</h1>
           <p class="why"><b>Why now:</b> {{ inc.whyNow }}</p>
@@ -115,7 +138,7 @@ interface WaterfallRow {
                     <li>
                       <span class="src-label">{{ s.label }}</span>
                       <span class="src-table">{{ s.table }}</span>
-                      — {{ s.meaning }}
+                      &mdash; {{ s.meaning }}
                     </li>
                   }
                 </ul>
@@ -129,8 +152,33 @@ interface WaterfallRow {
         </div>
       </section>
 
+      <!-- ============ lifecycle timeline ============ -->
+      <section class="panel timeline-panel">
+        <div class="timeline">
+          @for (stage of timelineStages(inc); track stage.key; let last = $last) {
+            <div class="tl-step" [class.done]="stage.done" [class.active]="stage.active" [class.pending]="stage.pending">
+              <div class="tl-circle">
+                @if (stage.done) { <span class="tl-check">&#10003;</span> }
+                @if (stage.active) { <span class="tl-dot"></span> }
+              </div>
+              <div class="tl-label">{{ stage.label }}</div>
+            </div>
+            @if (!last) {
+              <div class="tl-line" [class.done]="stage.done"></div>
+            }
+          }
+        </div>
+      </section>
+
+      <!-- ============ quick-nav bar ============ -->
+      <nav class="quicknav">
+        @for (nav of navItems; track nav.key) {
+          <button class="qnav-btn" (click)="scrollTo(nav.key)">{{ nav.label }}</button>
+        }
+      </nav>
+
       <!-- ============ explanation ============ -->
-      <section class="panel">
+      <section class="panel" id="section-explanation">
         <h2>Explanation</h2>
         <p class="explanation">{{ inc.explanation }}</p>
 
@@ -138,10 +186,11 @@ interface WaterfallRow {
           <h3>Evidence</h3>
           <ul class="evidence">
             @for (e of inc.evidence; track e.claim) {
-              <li>
+              <li [class.ev-primary]="isPrimaryEvidence(inc, e.metricId)"
+                  [class.ev-secondary]="!isPrimaryEvidence(inc, e.metricId)">
                 <span class="claim">{{ e.claim }}</span>
                 @if (e.metricId) {
-                  <span class="cite">{{ metricLabel(e.metricId) }}@if (e.entity) { · {{ e.entity }}}</span>
+                  <span class="cite">{{ metricLabel(e.metricId) }}@if (e.entity) { &middot; {{ e.entity }}}</span>
                 }
               </li>
             }
@@ -150,7 +199,7 @@ interface WaterfallRow {
       </section>
 
       <!-- ============ four reference frames ============ -->
-      <section class="panel">
+      <section class="panel" id="section-reference-frames">
         <h2>Reference frames &middot; fleet-wide</h2>
         <p class="hint">
           One value read four ways. A movement that is large against its own history but
@@ -159,8 +208,8 @@ interface WaterfallRow {
         </p>
         <p class="hint">
           <strong>Scope:</strong> these frames read the fleet-wide series for this metric, not the
-          slice named in the headline above. That is deliberate — the question they answer is
-          "is the fleet as a whole out of line?", which is what tells you whether one slice is a
+          slice named in the headline above. That is deliberate &mdash; the question they answer is
+          &ldquo;is the fleet as a whole out of line?&rdquo;, which is what tells you whether one slice is a
           local problem or the visible edge of a general one. It does mean the movement here will
           not equal the headline movement, and the two are not meant to reconcile.
         </p>
@@ -173,14 +222,17 @@ interface WaterfallRow {
               <div class="frame-v num" [style.color]="trendColor(o)">
                 {{ fmtDelta(o.references?.trend?.delta) }}
               </div>
-              <!-- The z decides the wording; it is not the wording. Printing "robust z −5.8" here
-                   put a statistic directly under prose that had just described the same movement in
-                   plain English, and the frame is the one with a number in it, so the frame is what
-                   gets read. -->
               <div class="frame-s num">
                 prior {{ fmtValue(o.references?.trend?.prior ?? null) }}
                 @if (unusualness(o); as u) { &middot; {{ u }} }
               </div>
+              <svg class="frame-gauge" width="80" height="6" aria-hidden="true">
+                <rect x="0" y="0" width="80" height="6" rx="3" fill="var(--surface-sunken)"/>
+                <rect x="0" y="0"
+                  [attr.width]="trendGaugePct(o)"
+                  height="6" rx="3"
+                  [attr.fill]="trendGaugeColor(o)"/>
+              </svg>
             </div>
 
             <!-- 2 - SLA -->
@@ -197,6 +249,13 @@ interface WaterfallRow {
                     &middot; {{ fmtDelta(o.references!.sla!.delta) }} away
                   }
                 </div>
+                <svg class="frame-gauge" width="80" height="6" aria-hidden="true">
+                  <rect x="0" y="0" width="80" height="6" rx="3" fill="var(--surface-sunken)"/>
+                  <rect x="0" y="0"
+                    [attr.width]="slaGaugePx(o)"
+                    height="6" rx="3"
+                    [attr.fill]="o.references!.sla!.breached ? 'var(--critical)' : 'var(--good)'"/>
+                </svg>
               } @else {
                 <div class="frame-v na">Not applicable</div>
                 <div class="frame-s">No target is written against this metric.</div>
@@ -207,13 +266,20 @@ interface WaterfallRow {
             <div class="frame">
               <div class="frame-h">Peer cohort</div>
               @if (o.references?.peer?.cohortMedian !== null && o.references?.peer?.cohortMedian !== undefined) {
-                <div class="frame-v num">{{ o.references!.peer!.rank ?? '—' }}</div>
+                <div class="frame-v num">{{ o.references!.peer!.rank ?? '&mdash;' }}</div>
                 <div class="frame-s num">
                   median {{ fmtValue(o.references!.peer!.cohortMedian) }}
                   @if (o.references?.peer?.percentile !== null && o.references?.peer?.percentile !== undefined) {
                     &middot; p{{ num(o.references!.peer!.percentile, 0) }}
                   }
                 </div>
+                <svg class="frame-gauge" width="80" height="6" aria-hidden="true">
+                  <rect x="0" y="0" width="80" height="6" rx="3" fill="var(--surface-sunken)"/>
+                  <rect x="0" y="0"
+                    [attr.width]="peerGaugePx(o)"
+                    height="6" rx="3"
+                    [attr.fill]="peerGaugeColor(o)"/>
+                </svg>
               } @else {
                 <div class="frame-v na">No cohort</div>
                 <div class="frame-s">Too few comparable entities cleared the volume gate.</div>
@@ -226,6 +292,9 @@ interface WaterfallRow {
               @if (o.references?.industry?.benchmark !== null && o.references?.industry?.benchmark !== undefined) {
                 <div class="frame-v num">{{ fmtValue(o.references!.industry!.benchmark) }}</div>
                 <div class="frame-s">{{ o.references!.industry!.source ?? 'benchmark' }}</div>
+                <span class="industry-pill" [class.ahead]="industryAhead(o)" [class.lagging]="!industryAhead(o)">
+                  {{ industryAhead(o) ? '&#9650; Ahead' : '&#9660; Lagging' }}
+                </span>
               } @else {
                 <div class="frame-v na">No benchmark</div>
                 <div class="frame-s">No external reference is published for this metric.</div>
@@ -235,7 +304,7 @@ interface WaterfallRow {
 
           <div class="obs-foot">
             {{ metricLabel(o.metricId) }}
-            &middot; {{ grainLabel(o.grain) }}{{ o.entity && o.entity !== 'ALL' ? ' · ' + o.entity : '' }}
+            &middot; {{ grainLabel(o.grain) }}{{ o.entity && o.entity !== 'ALL' ? ' &middot; ' + o.entity : '' }}
             &middot; {{ periodLabel(o.period) }}
             &middot; value <b class="num">{{ fmtValue(o.value) }}</b>
             &middot; n={{ num(o.sampleSize) }}
@@ -246,7 +315,7 @@ interface WaterfallRow {
       </section>
 
       <!-- ============ attribution waterfall ============ -->
-      <section class="panel">
+      <section class="panel" id="section-attribution">
         <h2>Attribution</h2>
 
         @if (attribution(); as a) {
@@ -271,10 +340,6 @@ interface WaterfallRow {
               </div>
             </div>
 
-            <!-- Waterfall. Sign is carried by which side of the centre line the
-                 bar grows toward AND by the signed label on every row. Colour is
-                 a third, redundant channel — red/green is invisible to a deutan
-                 reader (measured CVD dE 4.1), so it is never the only cue. -->
             <div class="waterfall" role="img"
                  [attr.aria-label]="'Contribution to ' + metricLabel(a.metricId) + ' by ' + grainLabel(w.dimension)">
               @for (r of waterfall(); track r.c.entity) {
@@ -291,7 +356,7 @@ interface WaterfallRow {
                   </div>
 
                   <div class="wf-value num" [class.neg]="r.negative">
-                    <span aria-hidden="true">{{ r.negative ? '▼' : '▲' }}</span>
+                    <span aria-hidden="true">{{ r.negative ? '&#9660;' : '&#9650;' }}</span>
                     {{ fmtDelta(r.c.total) }}
                   </div>
 
@@ -302,15 +367,9 @@ interface WaterfallRow {
               }
             </div>
 
-            <!-- Reconciliation: do the parts sum to the total? -->
             @if (a.reconciliation; as rec) {
               <div class="recon" [class.bad]="!rec.reconciles">
-                <span class="recon-icon" aria-hidden="true">{{ rec.reconciles ? '✓' : '!' }}</span>
-                <!-- The raw tolerance is deliberately not shown. It is a RELATIVE bound — 0.005 means
-                     half a percent of the movement, not half a rupee — so printing the constant beside
-                     an absolute error produced "error 0.007241745 (tolerance 0.005000000) —
-                     reconciles", which reads as the verdict contradicting the arithmetic beside it.
-                     What a reader needs is how big the gap is against the movement it belongs to. -->
+                <span class="recon-icon" aria-hidden="true">{{ rec.reconciles ? '&#10003;' : '!' }}</span>
                 <span class="num">
                   <b>Parts sum to total:</b>
                   {{ fmtDelta(rec.explainedSum) }} explained vs {{ fmtDelta(rec.actualDelta) }} actual
@@ -322,13 +381,11 @@ interface WaterfallRow {
             }
           } @else {
             <p class="hint idle">
-              No dimension could be decomposed for this movement — every candidate
+              No dimension could be decomposed for this movement &mdash; every candidate
               entity fell below the volume gate.
             </p>
           }
 
-          <!-- The dimensions that lost. Keeping them on the record is what makes
-               "this is not a vendor problem" a finding rather than an assumption. -->
           @if (a.ranked?.length) {
             <h3>Dimensions scanned, ranked</h3>
             <div class="scroll-x">
@@ -361,13 +418,13 @@ interface WaterfallRow {
         } @else if (attributionError()) {
           <p class="hint idle">{{ attributionError() }}</p>
         } @else {
-          <p class="hint idle">Decomposing…</p>
+          <p class="hint idle">Decomposing...</p>
         }
       </section>
 
       <!-- ============ data quality ============ -->
       @if (inc.quality; as q) {
-        <section class="panel quality">
+        <section class="panel quality" id="section-data-quality">
           <h2>Data quality</h2>
           <div class="q-head num">
             Coverage <b>{{ pct(q.coverage, 1) }}</b> &middot;
@@ -385,8 +442,57 @@ interface WaterfallRow {
         </section>
       }
 
+      <!-- ============ ask the agent (inline chat) ============ -->
+      <section class="panel chat-panel" id="section-ask-agent">
+        <div class="chat-header" (click)="toggleChat(inc)">
+          <h2 style="margin:0">Ask the Agent</h2>
+          <span class="chat-toggle-icon">{{ chatOpen() ? '&#9650;' : '&#9660;' }}</span>
+        </div>
+
+        @if (chatOpen()) {
+          <div class="chat-body">
+            <div class="chat-input-row">
+              <input
+                class="chat-input"
+                type="text"
+                [(ngModel)]="chatQuestionValue"
+                placeholder="Ask anything about this incident..."
+                (keydown.enter)="submitChat(inc)"
+                [disabled]="chatLoading()" />
+              <button class="chat-submit" (click)="submitChat(inc)" [disabled]="chatLoading() || !chatQuestionValue.trim()">
+                {{ chatLoading() ? '...' : 'Ask' }}
+              </button>
+            </div>
+
+            @if (chatError()) {
+              <p class="chat-error">{{ chatError() }}</p>
+            }
+
+            @if (chatAnswer(); as ans) {
+              <div class="chat-answer-box">
+                <div class="chat-answer-meta">
+                  <span class="chat-tier-badge">{{ ans.tier }}</span>
+                  @if (ans.declined) {
+                    <span class="chat-declined">Agent declined to answer</span>
+                  }
+                </div>
+                <p class="chat-answer-text">{{ ans.answer }}</p>
+                @if (ans.citations?.length) {
+                  <div class="chat-citations">
+                    <span class="chat-citations-label">Citations:</span>
+                    @for (cit of ans.citations; track cit.claim) {
+                      <span class="cite">{{ cit.claim }}</span>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+      </section>
+
       <!-- ============ policy + actions ============ -->
-      <section class="panel">
+      <section class="panel" id="section-actions">
         <h2>Recommended actions</h2>
 
         @if (inc.policy; as p) {
@@ -463,9 +569,7 @@ interface WaterfallRow {
   `,
   styles: [
     `
-      :host {
-        display: block;
-      }
+      :host { display: block; }
 
       .panel {
         background: var(--surface);
@@ -475,463 +579,157 @@ interface WaterfallRow {
         margin-bottom: 14px;
       }
 
-      h1 {
-        margin: 5px 0 0;
-        font-size: 19px;
-        font-weight: 650;
-        letter-spacing: -0.015em;
-        line-height: 1.3;
-      }
+      h1 { margin: 5px 0 0; font-size: 19px; font-weight: 650; letter-spacing: -0.015em; line-height: 1.3; }
+      h2 { margin: 0 0 4px; font-size: 13px; font-weight: 650; letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink-2); }
+      h3 { margin: 16px 0 6px; font-size: 11.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
 
-      h2 {
-        margin: 0 0 4px;
-        font-size: 13px;
-        font-weight: 650;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
-        color: var(--ink-2);
-      }
-
-      h3 {
-        margin: 16px 0 6px;
-        font-size: 11.5px;
-        font-weight: 650;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--ink-muted);
-      }
-
-      .hint {
-        margin: 4px 0 0;
-        font-size: 12px;
-        color: var(--ink-muted);
-        max-width: 78ch;
-      }
-
-      .hint.idle {
-        padding: 10px 0 2px;
-      }
-
-      .error {
-        margin: 0;
-        color: var(--critical);
-        font-size: 13px;
-      }
-
-      .mono {
-        font-family: var(--mono);
-      }
+      .hint { margin: 4px 0 0; font-size: 12px; color: var(--ink-muted); max-width: 78ch; }
+      .hint.idle { padding: 10px 0 2px; }
+      .error { margin: 0; color: var(--critical); font-size: 13px; }
+      .mono { font-family: var(--mono); }
 
       /* ---- header ---- */
-      .head {
-        display: flex;
-        gap: 13px;
-        padding: 0;
-        overflow: hidden;
-      }
+      .head { display: flex; gap: 13px; padding: 0; overflow: hidden; }
+      .stripe { width: 4px; flex: none; }
+      .stripe.tall { align-self: stretch; }
+      .head-body { padding: 13px 15px 14px 2px; min-width: 0; }
+      .row1 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .sev { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+      .tag { font-size: 10.5px; color: var(--ink-muted); padding: 1px 6px; border-radius: 4px; background: var(--surface-sunken); border: 1px solid var(--line); }
 
-      .stripe {
-        width: 4px;
-        flex: none;
-      }
+      /* Priority tag with score bar */
+      .priority-tag { display: inline-flex; flex-direction: column; gap: 3px; padding: 3px 7px 4px; min-width: 80px; }
+      .prio-bar-wrap { display: block; width: 66px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+      .prio-bar { display: block; height: 4px; border-radius: 2px; transition: width 0.3s ease; }
 
-      .stripe.tall {
-        align-self: stretch;
-      }
+      /* ID tag with copy button */
+      .id-tag { display: inline-flex; align-items: center; gap: 5px; }
+      .copy-btn { background: none; border: none; cursor: pointer; font-size: 11px; padding: 0 2px; color: var(--ink-muted); line-height: 1; border-radius: 3px; transition: background 0.15s; }
+      .copy-btn:hover { background: var(--line); }
 
-      .head-body {
-        padding: 13px 15px 14px 2px;
-        min-width: 0;
-      }
+      /* Status chip */
+      .status-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--line); text-transform: uppercase; }
+      .status-chip[data-status="OPEN"] { background: color-mix(in srgb, var(--critical) 10%, transparent); border-color: color-mix(in srgb, var(--critical) 35%, transparent); color: var(--critical); }
+      .status-chip[data-status="ESCALATED"] { background: color-mix(in srgb, var(--warning) 12%, transparent); border-color: color-mix(in srgb, var(--warning) 40%, transparent); color: var(--warning); }
+      .status-chip[data-status="RESOLVED"] { background: color-mix(in srgb, var(--good) 10%, transparent); border-color: color-mix(in srgb, var(--good) 35%, transparent); color: var(--good); }
+      .status-chip[data-status="DISMISSED"] { background: var(--surface-sunken); border-color: var(--line-strong); color: var(--ink-muted); }
 
-      .row1 {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
+      /* Finding count badge */
+      .badge-findings { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px; background: var(--accent-bg); border: 1px solid var(--accent-line); color: var(--accent); letter-spacing: 0.02em; }
 
-      .sev {
-        font-size: 10.5px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
+      .why { margin: 8px 0 0; font-size: 13px; color: var(--ink-2); max-width: 82ch; }
 
-      .tag {
-        font-size: 10.5px;
-        color: var(--ink-muted);
-        padding: 1px 6px;
-        border-radius: 4px;
-        background: var(--surface-sunken);
-        border: 1px solid var(--line);
-      }
+      .gloss { margin: 12px 0 0; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2); max-width: 82ch; }
+      .gloss-kicker { font-size: 10.5px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
+      .gloss-title { margin-top: 2px; font-size: 15px; font-weight: 620; color: var(--ink); }
+      .gloss-body { margin: 5px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+      .gloss-src { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+      .gloss-src li { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+      .src-label { font-weight: 600; color: var(--ink); }
+      .src-table { font-size: 10.5px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-left: 4px; }
+      .detected { margin: 6px 0 0; font-size: 11px; color: var(--ink-muted); }
 
-      .why {
-        margin: 8px 0 0;
-        font-size: 13px;
-        color: var(--ink-2);
-        max-width: 82ch;
-      }
+      /* ---- lifecycle timeline ---- */
+      .timeline-panel { padding: 12px 15px; }
+      .timeline { display: flex; align-items: center; overflow-x: auto; padding: 4px 0 8px; }
+      .tl-step { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: none; }
+      .tl-circle { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border: 2px solid var(--line-strong); background: var(--surface); color: var(--ink-muted); transition: all 0.2s; }
+      .tl-step.done .tl-circle { background: var(--good); border-color: var(--good); color: #fff; }
+      .tl-step.active .tl-circle { border-color: var(--accent); background: var(--accent-bg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+      .tl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+      .tl-check { color: #fff; font-size: 11px; }
+      .tl-label { font-size: 10.5px; color: var(--ink-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+      .tl-step.done .tl-label { color: var(--good); }
+      .tl-step.active .tl-label { color: var(--accent); }
+      .tl-line { flex: 1; height: 2px; min-width: 24px; background: var(--line); margin-bottom: 22px; transition: background 0.2s; }
+      .tl-line.done { background: var(--good); }
 
-      .gloss {
-        margin: 12px 0 0;
-        padding: 10px 12px;
-        border-radius: var(--radius);
-        border: 1px solid var(--line);
-        background: var(--surface-2);
-        max-width: 82ch;
-      }
+      /* ---- quick-nav ---- */
+      .quicknav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); }
+      .qnav-btn { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; padding: 4px 11px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+      .qnav-btn:hover { background: var(--accent-bg); border-color: var(--accent-line); color: var(--accent); }
 
-      .gloss-kicker {
-        font-size: 10.5px;
-        font-weight: 650;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--ink-muted);
-      }
+      /* ---- explanation ---- */
+      .explanation { margin: 8px 0 0; font-size: 13.5px; line-height: 1.62; color: var(--ink); max-width: 82ch; white-space: pre-wrap; }
 
-      .gloss-title {
-        margin-top: 2px;
-        font-size: 15px;
-        font-weight: 620;
-        color: var(--ink);
-      }
+      .evidence { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+      .evidence li { display: flex; gap: 9px; align-items: baseline; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); padding: 6px 9px; background: var(--surface-2); border-radius: 0 4px 4px 0; }
+      .evidence li.ev-primary { border-left: 3px solid var(--accent); }
+      .evidence li.ev-secondary { border-left: 3px solid var(--line-strong); }
 
-      .gloss-body {
-        margin: 5px 0 0;
-        font-size: 13px;
-        line-height: 1.5;
-        color: var(--ink-2);
-      }
-
-      .gloss-src {
-        list-style: none;
-        margin: 8px 0 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      .gloss-src li {
-        font-size: 12px;
-        color: var(--ink-2);
-        line-height: 1.4;
-      }
-
-      .src-label {
-        font-weight: 600;
-        color: var(--ink);
-      }
-
-      .src-table {
-        font-size: 10.5px;
-        color: var(--ink-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        margin-left: 4px;
-      }
-
-      .detected {
-        margin: 6px 0 0;
-        font-size: 11px;
-        color: var(--ink-muted);
-      }
-
-      .explanation {
-        margin: 8px 0 0;
-        font-size: 13.5px;
-        line-height: 1.62;
-        color: var(--ink);
-        max-width: 82ch;
-        white-space: pre-wrap;
-      }
-
-      .evidence {
-        list-style: none;
-        margin: 6px 0 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
-
-      .evidence li {
-        display: flex;
-        gap: 9px;
-        align-items: baseline;
-        flex-wrap: wrap;
-        font-size: 12.5px;
-        color: var(--ink-2);
-        padding: 6px 9px;
-        background: var(--surface-2);
-        border-left: 2px solid var(--accent-line);
-        border-radius: 0 4px 4px 0;
-      }
-
-      .cite {
-        font-size: 10.5px;
-        color: var(--ink-muted);
-        background: var(--surface-sunken);
-        border: 1px solid var(--line);
-        padding: 1px 5px;
-        border-radius: 4px;
-        white-space: nowrap;
-      }
+      .cite { font-size: 10.5px; color: var(--ink-muted); background: var(--surface-sunken); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
 
       /* ---- reference frames ---- */
-      .frames {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
-        gap: 1px;
-        margin-top: 11px;
-        background: var(--line);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        overflow: hidden;
-      }
+      .frames { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 1px; margin-top: 11px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+      .frame { background: var(--surface-2); padding: 10px 11px; }
+      .frame-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); font-weight: 600; }
+      .frame-v { font-size: 19px; font-weight: 620; margin-top: 3px; letter-spacing: -0.015em; }
+      .frame-v.na { font-size: 14px; color: var(--ink-muted); font-weight: 500; }
+      .frame-s { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+      .frame-gauge { display: block; margin-top: 8px; border-radius: 3px; }
 
-      .frame {
-        background: var(--surface-2);
-        padding: 10px 11px;
-      }
+      .industry-pill { display: inline-block; margin-top: 8px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 20px; }
+      .industry-pill.ahead { background: color-mix(in srgb, var(--good) 14%, transparent); border: 1px solid color-mix(in srgb, var(--good) 40%, transparent); color: var(--good); }
+      .industry-pill.lagging { background: color-mix(in srgb, var(--critical) 10%, transparent); border: 1px solid color-mix(in srgb, var(--critical) 35%, transparent); color: var(--critical); }
 
-      .frame-h {
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--ink-muted);
-        font-weight: 600;
-      }
-
-      .frame-v {
-        font-size: 19px;
-        font-weight: 620;
-        margin-top: 3px;
-        letter-spacing: -0.015em;
-      }
-
-      .frame-v.na {
-        font-size: 14px;
-        color: var(--ink-muted);
-        font-weight: 500;
-      }
-
-      .frame-s {
-        font-size: 11px;
-        color: var(--ink-muted);
-        margin-top: 2px;
-      }
-
-      .obs-foot {
-        margin-top: 9px;
-        font-size: 11px;
-        color: var(--ink-muted);
-      }
+      .obs-foot { margin-top: 9px; font-size: 11px; color: var(--ink-muted); }
 
       /* ---- waterfall ---- */
-      .wf-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 14px;
-        flex-wrap: wrap;
-        margin: 12px 0 8px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .wf-dim {
-        font-size: 14px;
-        font-weight: 650;
-        color: var(--ink);
-        margin-right: 9px;
-      }
-
-      .wf-sub,
-      .wf-total {
-        font-size: 11px;
-        color: var(--ink-muted);
-      }
-
-      .wf-total b {
-        font-size: 13px;
-      }
-
-      .waterfall {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
-
-      .wf-row {
-        display: grid;
-        grid-template-columns: minmax(96px, 150px) 1fr 86px minmax(0, 148px);
-        align-items: center;
-        gap: 10px;
-      }
-
-      .wf-label {
-        font-size: 12px;
-        color: var(--ink-2);
-        font-weight: 550;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .wf-track {
-        position: relative;
-        height: 17px;
-        background: var(--surface-sunken);
-        border-radius: 3px;
-        overflow: hidden;
-      }
-
-      /* The centre line IS the zero baseline — it is what makes the sign legible
-         without relying on the bar's colour. */
-      .wf-axis {
-        position: absolute;
-        left: 50%;
-        top: 0;
-        bottom: 0;
-        width: 1px;
-        background: var(--line-strong);
-      }
-
-      .wf-bar {
-        position: absolute;
-        top: 3px;
-        bottom: 3px;
-        background: var(--pos);
-        border-radius: 0 3px 3px 0;
-        min-width: 2px;
-      }
-
-      .wf-bar.neg {
-        background: var(--neg);
-        border-radius: 3px 0 0 3px;
-      }
-
-      .wf-value {
-        font-size: 12px;
-        font-weight: 650;
-        text-align: right;
-        color: var(--pos);
-        white-space: nowrap;
-      }
-
-      .wf-value.neg {
-        color: var(--neg);
-      }
-
-      .wf-split {
-        font-size: 10.5px;
-        color: var(--ink-muted);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
+      .wf-head { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 12px 0 8px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+      .wf-dim { font-size: 14px; font-weight: 650; color: var(--ink); margin-right: 9px; }
+      .wf-sub, .wf-total { font-size: 11px; color: var(--ink-muted); }
+      .wf-total b { font-size: 13px; }
+      .waterfall { display: flex; flex-direction: column; gap: 5px; }
+      .wf-row { display: grid; grid-template-columns: minmax(96px, 150px) 1fr 86px minmax(0, 148px); align-items: center; gap: 10px; }
+      .wf-label { font-size: 12px; color: var(--ink-2); font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .wf-track { position: relative; height: 17px; background: var(--surface-sunken); border-radius: 3px; overflow: hidden; }
+      .wf-axis { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--line-strong); }
+      .wf-bar { position: absolute; top: 3px; bottom: 3px; background: var(--pos); border-radius: 0 3px 3px 0; min-width: 2px; }
+      .wf-bar.neg { background: var(--neg); border-radius: 3px 0 0 3px; }
+      .wf-value { font-size: 12px; font-weight: 650; text-align: right; color: var(--pos); white-space: nowrap; }
+      .wf-value.neg { color: var(--neg); }
+      .wf-split { font-size: 10.5px; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
       /* ---- reconciliation ---- */
-      .recon {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-top: 13px;
-        padding: 9px 11px;
-        border-radius: var(--radius);
-        background: color-mix(in srgb, var(--good) 9%, transparent);
-        border: 1px solid color-mix(in srgb, var(--good) 32%, transparent);
-        font-size: 12px;
-        color: var(--ink-2);
-      }
-
-      .recon.bad {
-        background: color-mix(in srgb, var(--warning) 12%, transparent);
-        border-color: color-mix(in srgb, var(--warning) 45%, transparent);
-      }
-
-      .recon-icon {
-        font-weight: 700;
-        color: var(--good);
-      }
-
-      .recon.bad .recon-icon {
-        color: var(--warning);
-      }
-
-      .recon-note {
-        flex-basis: 100%;
-        color: var(--ink-muted);
-        font-size: 11.5px;
-      }
+      .recon { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 13px; padding: 9px 11px; border-radius: var(--radius); background: color-mix(in srgb, var(--good) 9%, transparent); border: 1px solid color-mix(in srgb, var(--good) 32%, transparent); font-size: 12px; color: var(--ink-2); }
+      .recon.bad { background: color-mix(in srgb, var(--warning) 12%, transparent); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+      .recon-icon { font-weight: 700; color: var(--good); }
+      .recon.bad .recon-icon { color: var(--warning); }
+      .recon-note { flex-basis: 100%; color: var(--ink-muted); font-size: 11.5px; }
+      .recon-gap { color: var(--ink-muted); font-size: 11px; }
 
       /* ---- ranked table ---- */
-      table.ranked {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-        min-width: 620px;
-      }
-
-      table.ranked th {
-        text-align: left;
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--ink-muted);
-        font-weight: 600;
-        padding: 5px 9px;
-        border-bottom: 1px solid var(--line-strong);
-        white-space: nowrap;
-      }
-
-      table.ranked td {
-        padding: 6px 9px;
-        border-bottom: 1px solid var(--line);
-        color: var(--ink-2);
-        white-space: nowrap;
-      }
-
-      table.ranked th.r,
-      table.ranked td.r {
-        text-align: right;
-      }
-
-      table.ranked tr.win td {
-        background: var(--accent-bg);
-        color: var(--ink);
-        font-weight: 600;
-      }
+      table.ranked { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 620px; }
+      table.ranked th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-muted); font-weight: 600; padding: 5px 9px; border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+      table.ranked td { padding: 6px 9px; border-bottom: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+      table.ranked th.r, table.ranked td.r { text-align: right; }
+      table.ranked tr.win td { background: var(--accent-bg); color: var(--ink); font-weight: 600; }
 
       /* ---- quality ---- */
-      .quality {
-        border-left: 3px solid var(--warning);
-      }
+      .quality { border-left: 3px solid var(--warning); }
+      .q-head { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; }
+      .caveats { margin: 8px 0 0; padding-left: 17px; display: flex; flex-direction: column; gap: 5px; }
+      .caveats li { font-size: 12px; color: var(--ink-2); line-height: 1.55; max-width: 88ch; }
 
-      .q-head {
-        font-size: 12.5px;
-        color: var(--ink-2);
-        margin-top: 6px;
-      }
-
-      .caveats {
-        margin: 8px 0 0;
-        padding-left: 17px;
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
-
-      .caveats li {
-        font-size: 12px;
-        color: var(--ink-2);
-        line-height: 1.55;
-        max-width: 88ch;
-      }
+      /* ---- inline chat ---- */
+      .chat-panel { padding: 12px 15px; }
+      .chat-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+      .chat-toggle-icon { font-size: 11px; color: var(--ink-muted); }
+      .chat-body { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+      .chat-input-row { display: flex; gap: 8px; }
+      .chat-input { flex: 1; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink); outline: none; transition: border-color 0.15s; }
+      .chat-input:focus { border-color: var(--accent-line); }
+      .chat-submit { padding: 7px 16px; border-radius: var(--radius); background: var(--accent); color: #fff; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: filter 0.15s; }
+      .chat-submit:hover:not(:disabled) { filter: brightness(1.1); }
+      .chat-submit:disabled { opacity: 0.5; cursor: default; }
+      .chat-error { font-size: 12px; color: var(--critical); margin: 0; }
+      .chat-answer-box { padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; gap: 8px; }
+      .chat-answer-meta { display: flex; align-items: center; gap: 8px; }
+      .chat-tier-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 7px; border-radius: 20px; background: var(--accent-bg); border: 1px solid var(--accent-line); color: var(--accent); }
+      .chat-declined { font-size: 11px; color: var(--warning); font-weight: 600; }
+      .chat-answer-text { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; }
+      .chat-citations { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+      .chat-citations-label { font-size: 10.5px; font-weight: 650; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 
       /* ---- actions ---- */
       /* The plain-English basis leads; the rule codes sit under it as provenance. */
@@ -949,173 +747,30 @@ interface WaterfallRow {
         background: color-mix(in srgb, var(--critical) 8%, transparent);
       }
 
-      .policy {
-        display: flex;
-        align-items: center;
-        gap: 9px;
-        flex-wrap: wrap;
-        font-size: 12px;
-        color: var(--ink-muted);
-        margin: 8px 0 12px;
-      }
-
-      .actions {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-
-      button.action {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        background: var(--accent);
-        color: #fff;
-        border: 1px solid transparent;
-        border-radius: var(--radius);
-        padding: 7px 13px;
-        font-size: 12.5px;
-        font-weight: 600;
-      }
-
-      button.action:hover:not(:disabled) {
-        filter: brightness(1.08);
-      }
-
-      button.action.blocked {
-        background: var(--surface-sunken);
-        color: var(--ink-muted);
-        border-color: var(--line-strong);
-        border-style: dashed;
-        text-decoration: line-through;
-        text-decoration-color: var(--ink-muted);
-      }
-
-      .a-target {
-        font-family: var(--mono);
-        font-size: 11px;
-        opacity: 0.9;
-      }
-
-      .a-lock {
-        font-size: 10px;
-        text-decoration: none;
-      }
-
-      .reasons {
-        margin: 10px 0 0;
-        padding-left: 17px;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-
-      .reasons li {
-        font-size: 11.5px;
-        color: var(--ink-muted);
-        max-width: 88ch;
-      }
-
-      .ops {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        align-items: center;
-        margin-top: 12px;
-      }
-
-      .recheck {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--ink-muted);
-        font-weight: 600;
-      }
-
-      .recheck input {
-        font: inherit;
-        font-size: 12.5px;
-        text-transform: none;
-        letter-spacing: 0;
-        font-weight: 500;
-        padding: 5px 8px;
-        border-radius: var(--radius);
-        border: 1px solid var(--line-strong);
-        background: var(--surface-2);
-        color: var(--ink);
-      }
-
-      button.ghost {
-        background: var(--surface-2);
-        color: var(--ink-2);
-        border: 1px solid var(--line-strong);
-        border-radius: var(--radius);
-        padding: 7px 12px;
-        font-size: 12px;
-        font-weight: 550;
-      }
-
-      .action-msg {
-        margin: 10px 0 0;
-        font-size: 12.5px;
-        color: var(--ink-2);
-      }
-
-      .action-msg.bad {
-        color: var(--critical);
-      }
+      .policy { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 12px; color: var(--ink-muted); margin: 8px 0 12px; }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      button.action { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #fff; border: 1px solid transparent; border-radius: var(--radius); padding: 7px 13px; font-size: 12.5px; font-weight: 600; }
+      button.action:hover:not(:disabled) { filter: brightness(1.08); }
+      button.action.blocked { background: var(--surface-sunken); color: var(--ink-muted); border-color: var(--line-strong); border-style: dashed; text-decoration: line-through; text-decoration-color: var(--ink-muted); }
+      .a-target { font-family: var(--mono); font-size: 11px; opacity: 0.9; }
+      .a-lock { font-size: 10px; text-decoration: none; }
+      .reasons { margin: 10px 0 0; padding-left: 17px; display: flex; flex-direction: column; gap: 4px; }
+      .reasons li { font-size: 11.5px; color: var(--ink-muted); max-width: 88ch; }
+      .ops { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+      .recheck { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-muted); font-weight: 600; }
+      .recheck input { font: inherit; font-size: 12.5px; text-transform: none; letter-spacing: 0; font-weight: 500; padding: 5px 8px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink); }
+      button.ghost { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 7px 12px; font-size: 12px; font-weight: 550; }
+      .action-msg { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-2); }
+      .action-msg.bad { color: var(--critical); }
 
       /* ---- picker ---- */
-      .empty h2 {
-        margin-bottom: 2px;
-      }
-
-      .picker {
-        list-style: none;
-        margin: 12px 0 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-
-      .picker button {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        text-align: left;
-        background: var(--surface-2);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 0 12px 0 0;
-        overflow: hidden;
-      }
-
-      .picker button:hover {
-        border-color: var(--accent-line);
-      }
-
-      .picker .stripe {
-        align-self: stretch;
-        min-height: 34px;
-      }
-
-      .ptitle {
-        flex: 1;
-        font-size: 12.5px;
-        font-weight: 550;
-        color: var(--ink);
-        padding: 8px 0;
-      }
-
-      .idtag {
-        font-size: 10.5px;
-        color: var(--ink-muted);
-      }
+      .empty h2 { margin-bottom: 2px; }
+      .picker { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+      .picker button { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 0 12px 0 0; overflow: hidden; }
+      .picker button:hover { border-color: var(--accent-line); }
+      .picker .stripe { align-self: stretch; min-height: 34px; }
+      .ptitle { flex: 1; font-size: 12.5px; font-weight: 550; color: var(--ink); padding: 8px 0; }
+      .idtag { font-size: 10.5px; color: var(--ink-muted); }
     `,
   ],
 })
@@ -1135,6 +790,16 @@ export class IncidentComponent implements OnInit, OnChanges {
   readonly actionMessage = signal<string | null>(null);
   readonly actionError = signal(false);
   recheckPeriod = '2026-07';
+
+  // ---- copy-ID signal ----
+  readonly copied = signal(false);
+
+  // ---- inline chat signals ----
+  readonly chatOpen = signal(false);
+  readonly chatAnswer = signal<ChatResponse | null>(null);
+  readonly chatLoading = signal(false);
+  readonly chatError = signal<string | null>(null);
+  chatQuestionValue = '';
 
   /** The metric unit drives value formatting across every frame on this page. */
   private readonly unit = signal<string>('rate');
@@ -1163,6 +828,15 @@ export class IncidentComponent implements OnInit, OnChanges {
     const id = inc?.evidence?.find((e) => !!e.metricId)?.metricId;
     return this.glossary.metric(id);
   });
+
+  // Quick-nav items
+  readonly navItems: { key: string; label: string }[] = [
+    { key: 'explanation', label: 'Explanation' },
+    { key: 'reference-frames', label: 'Reference Frames' },
+    { key: 'attribution', label: 'Attribution' },
+    { key: 'data-quality', label: 'Data Quality' },
+    { key: 'actions', label: 'Actions' },
+  ];
 
   // re-exported for the template
   readonly num = num;
@@ -1201,6 +875,144 @@ export class IncidentComponent implements OnInit, OnChanges {
 
   clickable(a: Action): boolean {
     return a.type === 'notify' || a.type === 'vendor_escalation';
+  }
+
+  // ---- copy ID to clipboard ----
+  copyId(id: string): void {
+    void navigator.clipboard.writeText(id).then(() => {
+      this.copied.set(true);
+      setTimeout(() => this.copied.set(false), 2000);
+    });
+  }
+
+  // ---- status chip icon ----
+  statusIcon(status: string): string {
+    switch (status) {
+      case 'OPEN':      return '\uD83D\uDD34';
+      case 'DISMISSED': return '\u26AB';
+      case 'ESCALATED': return '\uD83D\uDFE0';
+      case 'RESOLVED':  return '\uD83D\uDFE2';
+      default:          return '\u26AA';
+    }
+  }
+
+  // ---- priority score bar ----
+  priorityPct(priority: number): number {
+    // P1=100%, P2=80%, P3=60%, P4=40%, P5=20%
+    return Math.max(20, 120 - priority * 20);
+  }
+
+  priorityBarColor(priority: number): string {
+    if (priority <= 2) return 'var(--critical)';
+    if (priority === 3) return 'var(--warning)';
+    return 'var(--good)';
+  }
+
+  // ---- lifecycle timeline stages ----
+  timelineStages(inc: Incident): { key: string; label: string; done: boolean; active: boolean; pending: boolean }[] {
+    const actioned = !!(inc.recommendedActions?.some((a) => a.permitted));
+    const hasFollowUp = inc.followUpAt != null;
+    const resolved = inc.status === 'DISMISSED' || inc.status === 'RESOLVED';
+
+    const doneFlags = [
+      true,        // Detected: always done
+      true,        // Triaged: always done
+      actioned,    // Actioned
+      hasFollowUp, // Follow-up
+      resolved,    // Resolved
+    ];
+
+    const labels = ['Detected', 'Triaged', 'Actioned', 'Follow-up', 'Resolved'];
+    const activeIdx = doneFlags.findIndex((d) => !d);
+
+    return labels.map((label, i) => ({
+      key: label.toLowerCase().replace('-', ''),
+      label,
+      done: doneFlags[i],
+      active: i === activeIdx,
+      pending: !doneFlags[i] && i !== activeIdx,
+    }));
+  }
+
+  // ---- quick-nav scroll ----
+  scrollTo(key: string): void {
+    document.getElementById('section-' + key)?.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // ---- evidence primary/secondary ----
+  primaryMetricId(inc: Incident): string | null {
+    return inc.evidence?.find((e) => !!e.metricId)?.metricId ?? null;
+  }
+
+  isPrimaryEvidence(inc: Incident, metricId: string | null): boolean {
+    if (!metricId) return false;
+    return metricId === this.primaryMetricId(inc);
+  }
+
+  // ---- reference frame gauges ----
+
+  trendGaugePct(o: MetricObservation): number {
+    const z = o.references?.trend?.robustZ ?? 0;
+    return Math.min((Math.abs(z) / 4) * 80, 80);
+  }
+
+  trendGaugeColor(o: MetricObservation): string {
+    const z = o.references?.trend?.robustZ ?? 0;
+    return z < -2 ? 'var(--critical)' : 'var(--accent)';
+  }
+
+  slaGaugePx(o: MetricObservation): number {
+    const sla = o.references?.sla;
+    if (!sla) return 0;
+    if (sla.breached) return 80;
+    const value = o.value ?? 0;
+    const target = sla.target ?? 0;
+    if (target === 0) return 0;
+    return Math.min((value / target) * 80, 80);
+  }
+
+  peerGaugePx(o: MetricObservation): number {
+    const p = o.references?.peer?.percentile ?? 50;
+    return Math.min((p / 100) * 80, 80);
+  }
+
+  peerGaugeColor(o: MetricObservation): string {
+    const p = o.references?.peer?.percentile ?? 50;
+    if (p < 25) return 'var(--critical)';
+    if (p > 50) return 'var(--good)';
+    return 'var(--accent)';
+  }
+
+  industryAhead(o: MetricObservation): boolean {
+    const benchmark = o.references?.industry?.benchmark;
+    if (benchmark === null || benchmark === undefined) return false;
+    return (o.value ?? 0) >= benchmark;
+  }
+
+  // ---- inline chat ----
+  toggleChat(inc: Incident): void {
+    const wasOpen = this.chatOpen();
+    this.chatOpen.set(!wasOpen);
+    if (!wasOpen && !this.chatQuestionValue) {
+      this.chatQuestionValue = 'Explain root cause: ' + inc.title;
+    }
+  }
+
+  async submitChat(inc: Incident): Promise<void> {
+    const q = this.chatQuestionValue.trim();
+    if (!q) return;
+    this.chatLoading.set(true);
+    this.chatError.set(null);
+    this.chatAnswer.set(null);
+    try {
+      const period = this.observation()?.period ?? undefined;
+      const ans = await this.api.chat(q, period);
+      this.chatAnswer.set(ans);
+    } catch (e) {
+      this.chatError.set(e instanceof Error ? e.message : String(e));
+    } finally {
+      this.chatLoading.set(false);
+    }
   }
 
   async onAction(a: Action): Promise<void> {
@@ -1270,9 +1082,9 @@ export class IncidentComponent implements OnInit, OnChanges {
   }
 
   fmtValue(v: number | null): string {
-    if (v === null || v === undefined) return '—';
+    if (v === null || v === undefined) return '\u2014';
     return this.unit() === 'currency'
-      ? `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+      ? `\u20B9${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
       : this.unit() === 'rate'
         ? pct(v)
         : num(v, 2);
@@ -1300,13 +1112,13 @@ export class IncidentComponent implements OnInit, OnChanges {
    * arithmetic reconciles. One formatter, one documented scale, verified against a live response.
    */
   fmtDelta(v: number | null | undefined): string {
-    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+    if (v === null || v === undefined || !Number.isFinite(v)) return '\u2014';
     const scaled = this.unit() === 'rate' ? v * 100 : v;
-    const sign = scaled > 0 ? '+' : scaled < 0 ? '−' : '';
+    const sign = scaled > 0 ? '+' : scaled < 0 ? '\u2212' : '';
     const magnitude = Math.abs(scaled);
     switch (this.unit()) {
       case 'currency':
-        return `${sign}₹${magnitude.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+        return `${sign}\u20B9${magnitude.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
       case 'minutes':
         return `${sign}${magnitude.toFixed(1)} min`;
       case 'rate':
@@ -1356,8 +1168,8 @@ export class IncidentComponent implements OnInit, OnChanges {
 
   splitTitle(c: Contribution): string {
     return (
-      `rate effect ${signed(c.rateEffect)} · mix effect ${signed(c.mixEffect)} · ` +
-      `share ${pct(c.shareBefore, 2)} → ${pct(c.shareAfter, 2)}`
+      `rate effect ${signed(c.rateEffect)} \u00B7 mix effect ${signed(c.mixEffect)} \u00B7 ` +
+      `share ${pct(c.shareBefore, 2)} \u2192 ${pct(c.shareAfter, 2)}`
     );
   }
 
@@ -1379,6 +1191,11 @@ export class IncidentComponent implements OnInit, OnChanges {
     this.observation.set(null);
     this.attribution.set(null);
     this.attributionError.set(null);
+    // Reset chat state on incident change
+    this.chatOpen.set(false);
+    this.chatAnswer.set(null);
+    this.chatError.set(null);
+    this.chatQuestionValue = '';
 
     let inc: Incident;
     try {
