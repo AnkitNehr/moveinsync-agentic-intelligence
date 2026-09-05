@@ -124,7 +124,7 @@ public final class BuiltInChatRouter implements ChatPort {
      */
     private static final Map<String, String> DIMENSION_LABELS = Map.of(
             "trip_direction", "the morning/evening split",
-            "product_type", "the type of vehicle",
+            "product_type", "vehicle type",
             "route_source", "how the route was planned",
             "business_unit", "business unit",
             "shift_type", "shift",
@@ -940,6 +940,9 @@ public final class BuiltInChatRouter implements ChatPort {
     // ---- attribute --------------------------------------------------------------------------------
 
     private Answer attributionAnswer(String metricId, String period, Slice slice) {
+        if (slice != null && !MetricSpec.GLOBAL.equals(slice.dimension())) {
+            return observationAnswer(metricId, period, slice);
+        }
         String priorPeriod = MetricQueryService.previousPeriod(period);
         AttributionResult result = attribution.attribute(metricId, period, priorPeriod);
 
@@ -1118,9 +1121,9 @@ public final class BuiltInChatRouter implements ChatPort {
             "summarize", "summarise", "summary", "tell", "details", "profile", "overview",
             "how", "what", "is", "are", "did", "performance", "look", "travel", "services",
             "logistics", "campus", "office", "hub", "fleet", "rate", "cost", "p90", "delay",
-            "me", "our", "all");
+            "me", "our", "all", "cab", "cabs", "bus", "buses", "compliance", "why", "low", "high", "drop", "rise");
 
-    private int scoreEntityMatch(String normalisedQuestion, String entity) {
+    private int scoreEntityMatch(String metricId, String normalisedQuestion, String entity) {
         if (entity == null || entity.length() < MIN_TOKEN_LENGTH) {
             return 0;
         }
@@ -1128,6 +1131,13 @@ public final class BuiltInChatRouter implements ChatPort {
         if (needle.isEmpty()) {
             return 0;
         }
+
+        // If the entity name is simply a word in the metric id itself (e.g. "cab" in "cab_noncompliance",
+        // "driver" in "driver_noncompliance"), it was used to name the metric, not as an entity filter.
+        if (metricId != null && !metricId.equals("profile") && metricId.toLowerCase(Locale.ROOT).contains(needle)) {
+            return 0;
+        }
+
         // Exact whole-phrase match: highest priority
         if (containsWord(normalisedQuestion, needle)) {
             return 10000 + needle.length();
@@ -1185,7 +1195,7 @@ public final class BuiltInChatRouter implements ChatPort {
                 if (entity == null || entity.length() < MIN_TOKEN_LENGTH) {
                     continue;
                 }
-                int score = scoreEntityMatch(normalisedQuestion, entity);
+                int score = scoreEntityMatch(metricId, normalisedQuestion, entity);
                 if (score > bestScore) {
                     best = new Slice(grain, entity);
                     bestScore = score;
@@ -1283,6 +1293,16 @@ public final class BuiltInChatRouter implements ChatPort {
         table.put("escort", "escort_compliance");
         table.put("marshal", "escort_compliance");
         table.put("driver compliance", "driver_noncompliance");
+        table.put("driver non-compliance", "driver_noncompliance");
+        table.put("driver noncompliance", "driver_noncompliance");
+        table.put("driver non compliance", "driver_noncompliance");
+        table.put("cab compliance", "cab_noncompliance");
+        table.put("cab non-compliance", "cab_noncompliance");
+        table.put("cab noncompliance", "cab_noncompliance");
+        table.put("cab non compliance", "cab_noncompliance");
+        table.put("vehicle compliance", "cab_noncompliance");
+        table.put("vehicle non-compliance", "cab_noncompliance");
+        table.put("vehicle noncompliance", "cab_noncompliance");
         table.put("non-compliance", "driver_noncompliance");
         table.put("noncompliance", "driver_noncompliance");
 

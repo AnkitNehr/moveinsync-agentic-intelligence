@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.moveinsync.mi.audit.AuditLog;
 import com.moveinsync.mi.glossary.OperatorCopy;
 import com.moveinsync.mi.metric.MetricCatalog;
+import com.moveinsync.mi.metrics.spi.MetricSpec;
 import com.moveinsync.mi.model.Evidence;
 import com.moveinsync.mi.pipeline.PortRegistry;
 import com.moveinsync.mi.pipeline.SenseReasonActPipeline;
@@ -133,23 +134,30 @@ public class ChatController {
 
         // Follow-ups, without giving the router a memory.
         //
-        // "What is the no-show rate for July" then "what about June?" — the second question names a
-        // period and nothing else, so every resolver misses and it declines. Rather than thread
-        // conversation state through ChatPort and every implementation behind it, the client sends
-        // the previous question back and we retry the two of them together. "no-show rate for July
-        // what about June" resolves the metric from the first half and the period from the second.
-        //
-        // Retried only on a decline, so a question that already worked is never affected — the
-        // deterministic path stays exactly as fast and as cheap as it was. And no session state
-        // exists to leak between users or to survive a restart, which for a tool with no auth is
-        // the property worth having.
-        if (answer != null && answer.declined()
-                && request.previousQuestion() != null && !request.previousQuestion().isBlank()) {
-            String merged = request.previousQuestion().trim() + " " + request.question().trim();
-            ChatPort.Answer withContext = ports.chat().ask(merged, defaultPeriod);
-            if (withContext != null && !withContext.declined()) {
-                log.info("Follow-up '{}' resolved using the previous question", request.question());
-                answer = withContext;
+        // Context is merged when either:
+        // 1. The question was declined on its own (e.g. "what about June?")
+        // 2. The question answered about global fleet aggregate while the previous question was
+        //    focusing on a specific entity slice (e.g. previous was "Tell me about Sanjay Travel",
+        //    and follow-up is "why cab compliance is low?")
+        if (request.previousQuestion() != null && !request.previousQuestion().isBlank()) {
+            boolean isGlobalOrDeclined = answer == null || answer.declined()
+                    || (answer.resolvedCall() != null && MetricSpec.GLOBAL.equals(answer.resolvedCall().dimension()));
+
+            if (isGlobalOrDeclined) {
+                String merged = request.previousQuestion().trim() + " " + request.question().trim();
+                ChatPort.Answer withContext = ports.chat().ask(merged, defaultPeriod);
+                if (withContext != null && !withContext.declined()) {
+                    boolean previousDeclined = answer == null || answer.declined();
+                    boolean contextAddedEntity = withContext.resolvedCall() != null
+                            && !MetricSpec.GLOBAL.equals(withContext.resolvedCall().dimension());
+                    if (previousDeclined || contextAddedEntity) {
+                        log.info("Follow-up '{}' contextualised with previous question to {}={}",
+                                request.question(),
+                                withContext.resolvedCall() != null ? withContext.resolvedCall().dimension() : "n/a",
+                                withContext.resolvedCall() != null ? withContext.resolvedCall().entity() : "n/a");
+                        answer = withContext;
+                    }
+                }
             }
         }
 
