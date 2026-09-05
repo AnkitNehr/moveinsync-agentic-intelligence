@@ -1,0 +1,54 @@
+﻿# Cab non-compliance rate — vehicle fitness and compliance control metric.
+#
+# Complements driver_noncompliance by tracking vehicle-side issues (cab fitness, permits,
+# vehicle condition, cleanliness, safety features).
+#
+id: cab_noncompliance
+label: Cab Non-Compliance Rate
+description: >
+  Share of trips flagged for vehicle or cab non-compliance. Rare-event vehicle safety and
+  standards metric with volume gating.
+version: 1
+
+source_view: trips
+formula: "avg(CASE WHEN is_cab_nc THEN 1.0 ELSE 0.0 END)"
+time_column: month
+
+direction: lower_is_better
+unit: rate
+rate_metric: true
+
+sla_key: null
+industry_key: null
+
+min_sample: 5000
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - product_type
+  - trip_direction
+  - shift_type
+  - route_source
+
+dimension_sql:
+  vendor: vendor_id
+
+coverage_expr: "count(is_cab_nc)"
+
+caveats:
+  - "Base rate is rare (~0.1%). min_sample is 5,000 so a single vehicle issue does not read as a double-digit swing."
+  - "is_cab_nc tracks vehicle compliance distinct from is_driver_nc which tracks driver conduct."
+
+requires_columns:
+  - is_cab_nc
+  - month
+  - business_unit
+  - office
+  - vendor_id
+  - product_type
+  - trip_direction
+  - shift_type
+  - route_source

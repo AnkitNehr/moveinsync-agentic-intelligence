@@ -222,6 +222,12 @@ export class ApiService {
     );
   }
 
+  precomputeBriefs(period?: string): Promise<{ period: string; precomputedPersonas: Record<string, string>; cachedCount: number }> {
+    return this.request('/reports/brief/precompute' + this.query({ period }), {
+      method: 'POST',
+    });
+  }
+
   personas(): Promise<string[]> {
     return this.request<string[]>('/reports/personas');
   }
