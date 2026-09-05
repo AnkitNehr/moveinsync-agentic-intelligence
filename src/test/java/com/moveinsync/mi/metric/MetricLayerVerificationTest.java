@@ -110,9 +110,13 @@ class MetricLayerVerificationTest {
         assertEquals(1339.44, global("cost_per_trip", "2026-06"), 0.01);
         assertEquals(1355.61, global("cost_per_trip", "2026-07"), 0.01);
 
-        assertEquals(77.29, global("cost_per_km", "2026-05"), 0.01);
-        assertEquals(80.24, global("cost_per_km", "2026-06"), 0.01);
-        assertEquals(78.49, global("cost_per_km", "2026-07"), 0.01);
+        // Credit notes (negative trip_cost) are excluded from this unit cost, so these are the
+        // post-FILTER figures. Recomputed straight from bill_data.csv rather than read off the
+        // implementation: May moves 77.29 -> 86.60 because 169 May credit lines total -15,480,950.24;
+        // June is unchanged (no negative lines); July moves 78.49 -> 78.51 on 20 lines (-21,847.50).
+        assertEquals(86.5954, global("cost_per_km", "2026-05"), 0.01);
+        assertEquals(80.2389, global("cost_per_km", "2026-06"), 0.01);
+        assertEquals(78.5061, global("cost_per_km", "2026-07"), 0.01);
     }
 
     @Test

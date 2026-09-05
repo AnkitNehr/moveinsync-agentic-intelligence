@@ -32,12 +32,24 @@ app:
     alert-ack-minutes: 15
     # Only meaningful for distance-based contracts; fixed-rate contracts report 0 km.
     #
-    # Derived from the data, NOT guessed. Blended cost per km on distance-based
-    # contracts runs 75.37 (May) / 80.05 (Jun) / 78.37 (Jul), median per-line 88.5.
-    # A target of 25.0 put every business unit permanently in CRITICAL breach and
-    # flagged a cost *decrease* as an incident. 85.0 sits just above the observed
-    # blended rate, so it is a genuine ceiling rather than a constant alarm.
+    # Derived from the data, NOT guessed. A target of 25.0 put every business unit
+    # permanently in CRITICAL breach and flagged a cost *decrease* as an incident.
     # See tools/analysis/sla_baseline.py for the query behind this number.
+    #
+    # CALIBRATION HISTORY — kept because the ordering mistake is instructive.
+    # 85.0 was first derived from the PRE-credit-note series (75.37 / 80.05 / 78.37).
+    # Excluding negative trip_cost afterwards moved the series to 86.60 / 80.24 / 78.51,
+    # so the ceiling was set against numbers that no longer existed. Deriving a
+    # threshold before finishing the metric definition is the mistake; the lesson is
+    # that an SLA constant must be re-derived whenever its metric's formula changes.
+    #
+    # VERIFIED BEHAVIOUR against the post-filter series:
+    #   2026-05  86.60  breaches   <- the expensive month, correctly flagged
+    #   2026-06  80.24  clears
+    #   2026-07  78.51  clears
+    # The threshold happens to sit between the worst month and the improving ones,
+    # which is where a ceiling belongs, so it is left at 85.0 deliberately rather
+    # than by inertia. Retuning it is a business decision, not a mechanical fix.
     cost-per-km-distance-contracts: 85.0
     # Mean billed cost per trip is 1331 (May) / 1340 (Jun) / 1356 (Jul);
     # median 1275, p90 1860. 1400 is a ceiling with headroom above the trend.
