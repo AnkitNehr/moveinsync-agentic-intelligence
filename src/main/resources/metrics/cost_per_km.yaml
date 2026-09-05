@@ -1,0 +1,78 @@
+# Cost per kilometre — VALID ONLY FOR DISTANCE-BASED CONTRACTS.
+#
+# This is the single most dangerous metric in the catalog, so the guard is declarative rather than
+# left to callers. About 42% of bill rows report total_trip_km = 0. That is not missing data: those
+# are fixed-rate contracts where distance is not what is billed. Dividing their cost by their
+# distance produces numbers that are arithmetically real and operationally nonsense:
+#
+#   contract          rows     zero-km share   naive cost/km
+#   6S-HYD           23,945       99.97%        180,538
+#   4S-HYD           24,530       99.96%        146,668
+#   4S-EV-Z          48,295       99.82%         36,039
+#   6S-150ORRNEW     36,157       99.71%         25,090
+#   4S-150ORRNEW     75,080       99.68%         20,595
+#
+# against genuine distance-based contracts, which land where you would expect:
+#
+#   4Seater         151,770        0.12%             83
+#   6Seater          18,362        0.02%            105
+#   DV_Package       78,410        0.30%            100
+#   3S_Jan2024_CNG   55,143        0.01%             74
+#
+# segment_by + valid_segments below is how that guard is enforced: the metric layer appends the
+# regime predicate to every query for this metric, so no caller — dashboard, agent, or chat — can
+# ask for cost per km on a fixed-rate contract and receive a number back.
+id: cost_per_km
+label: Cost per Kilometre (distance-based contracts)
+description: >
+  Billed cost per kilometre travelled, restricted to distance-based contracts. Undefined for
+  fixed-rate contracts, which bill a flat amount and report zero distance.
+version: 1
+
+source_view: bills
+formula: "sum(trip_cost) / nullif(sum(total_trip_km), 0)"
+time_column: month
+
+direction: lower_is_better
+unit: currency
+rate_metric: false
+
+sla_key: sla.cost-per-km-distance-contracts
+industry_key: null
+
+min_sample: 500
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - contract
+  - slab_name
+
+# The metric is only defined inside one segment of this column. The metric layer applies this as a
+# mandatory predicate, and billing_regime is deliberately absent from grains: slicing a metric by
+# the very dimension that determines whether it is defined would produce a FIXED_RATE row.
+segment_by: billing_regime
+valid_segments:
+  - DISTANCE_BASED
+
+coverage_expr: "count(total_trip_km)"
+
+caveats:
+  - "Verified on the DISTANCE_BASED segment: 77.29 (May), 80.24 (June), 78.49 (July) at full coverage, against a fixed-rate segment whose naive figure is 4,947. The regime split is 368,849 distance rows to 252,093 fixed-rate rows."
+  - "The configured target of 25.0 sits far below the observed 77-80 range, so the SLA frame reads as a standing 3x breach on every slice. It is reported as measured, but it needs recalibration against these contracts before it is used to authorise an escalation."
+  - "Only valid for distance-based contracts. Fixed-rate contracts (4S-HYD and 6S-HYD at 100% zero-km, 4S-EV-Z at 99.8%, the *-ORRNEW family at 99.7%, and the Short/Medium/Long slabs at ~98%) are excluded by the billing_regime predicate, not by a zero-km filter, so the exclusion is a contract fact rather than a data artefact."
+  - "A small number of rows on 6S-PREMIUMNEW carry negative distance, which drives that contract's naive cost per km negative. Negative distance is retained and flagged rather than dropped; it lowers coverage for the affected slice."
+  - "The 25.0 target in app.sla is a distance-contract target. Comparing a fixed-rate segment against it would be meaningless, which is the second reason for the regime guard."
+
+requires_columns:
+  - trip_cost
+  - total_trip_km
+  - billing_regime
+  - month
+  - business_unit
+  - office
+  - vendor
+  - contract
+  - slab_name

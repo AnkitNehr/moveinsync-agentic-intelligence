@@ -1,0 +1,126 @@
+/* ---------------------------------------------------------------------------
+   Mobility Intelligence — ops console design tokens.
+
+   Slate + amber. Every colour below is a role, never a raw hex at the call
+   site, so the light/dark swap happens in exactly one place.
+
+   The four status colours are the fixed status palette (good / warning /
+   serious / critical). They are deliberately NOT reused as series colours, and
+   they never carry meaning by hue alone — every status in this app ships with
+   a text label beside the colour.
+
+   Waterfall note: --pos / --neg are green/red, which a deutan reader cannot
+   separate (measured OKLab CVD dE 4.1). Hue is therefore the THIRD channel in
+   the waterfall, never the first. Sign is carried by (1) which side of the
+   centre baseline the bar grows toward and (2) a signed direct label on every
+   bar. Remove either of those and the chart stops being accessible.
+   --------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  /* surfaces */
+  --page: #f1f5f9;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-sunken: #f1f5f9;
+
+  /* ink */
+  --ink: #0f172a;
+  --ink-2: #475569;
+  --ink-muted: #64748b;
+
+  /* lines */
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+
+  /* accent — amber */
+  --accent: #b45309;
+  --accent-bg: #fffbeb;
+  --accent-line: #fcd34d;
+
+  /* status (fixed, never themed) */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  /* waterfall poles — see note above; geometry carries the sign, not these */
+  --pos: #0ca30c;
+  --neg: #d03b3b;
+
+  --radius: 6px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --page: #020617;
+    --surface: #0f172a;
+    --surface-2: #131f38;
+    --surface-sunken: #0b1224;
+
+    --ink: #f1f5f9;
+    --ink-2: #cbd5e1;
+    --ink-muted: #94a3b8;
+
+    --line: #1e293b;
+    --line-strong: #334155;
+
+    --accent: #fbbf24;
+    --accent-bg: #1c1917;
+    --accent-line: #78350f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Columns of figures align; standalone display numbers do not use tabular. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Wide content scrolls inside its own box; the page never scrolls sideways. */
+.scroll-x {
+  overflow-x: auto;
+}

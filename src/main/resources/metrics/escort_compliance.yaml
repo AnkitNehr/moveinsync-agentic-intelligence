@@ -1,0 +1,81 @@
+# Night-shift escort coverage — the safety control metric.
+#
+# Verified against the trips view, restricted to shifts starting at or after 20:00 or at or before
+# 05:00:
+#   2026-05  46.10%   n=51,269
+#   2026-06  45.50%   n=55,436
+#   2026-07  46.27%   n=58,351
+#
+# READ THE CAVEAT BEFORE READING THE NUMBER. The extracts carry actual_escort — whether an escort
+# was present — but no flag for whether one was REQUIRED. The real policy trigger is a female
+# employee first-picked-up or last-dropped after dark, and that condition lives in the employee
+# extract (gender, boarding order), not in the trip row. So this metric measures escort COVERAGE
+# over the night population, and the stable ~46% is consistent with a gender-conditioned policy
+# being followed, not with a 54-point compliance failure.
+#
+# That is why sla_advisory is true. The 100% target from app.sla is reported as context, because
+# the mandatory contextualisation requirement says every reference frame is either populated or
+# explicitly unavailable — but it is not allowed to drive severity. Left unguarded, an
+# approximate denominator would pin this metric at CRITICAL in every period and flood the ranker
+# with a finding that never changes and no one can action. The signal worth alerting on here is
+# MOVEMENT: coverage falling on a route or vendor where it used to hold. Trend and peer frames
+# carry that, and they are unaffected by the denominator approximation.
+id: escort_compliance
+label: Night Escort Coverage
+description: >
+  Share of night-shift trips that carried an escort. An approximation of policy compliance: the
+  trip extracts record escort presence but not escort requirement.
+version: 1
+
+source_view: trips
+formula: "avg(CASE WHEN coalesce(actual_escort, FALSE) THEN 1.0 ELSE 0.0 END)"
+# shift_type is a clock time as text ('09:00', '22:00', '21:16') with a 'Non Shift' sentinel.
+# TRY_CAST on the hour prefix yields null for the sentinel and for any malformed value, and null
+# fails the comparison, so non-shift and unparseable rows fall out of the night population rather
+# than being silently counted as day trips.
+filter: "TRY_CAST(substr(shift_type, 1, 2) AS INTEGER) >= 20 OR TRY_CAST(substr(shift_type, 1, 2) AS INTEGER) <= 5"
+time_column: month
+
+direction: higher_is_better
+unit: rate
+rate_metric: true
+
+sla_key: sla.escort-compliance
+# Report the SLA frame; do not let it drive severity. See the header note.
+sla_advisory: true
+industry_key: null
+
+min_sample: 300
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - product_type
+  - trip_direction
+  - trip_nodal
+  - route_source
+
+dimension_sql:
+  vendor: vendor_id
+
+coverage_expr: "count(actual_escort)"
+
+caveats:
+  - "Escort REQUIREMENT is not present in the trip extracts, only escort PRESENCE. The denominator here is all night-shift trips, which over-counts: the underlying policy is conditioned on employee gender and boarding order, which live in the employee extract. Read this as coverage, not as compliance, and read movement rather than level."
+  - "The night population is derived by parsing the hour prefix of shift_type, which is free text ('09:00', '22:00', 'Non Shift'). Rows whose hour will not parse are excluded from the population, not counted as day trips."
+  - "Night trips are 96.9% LOGOUT by volume, so office and vendor slices on this metric are effectively evening-drop slices. Escort coverage is near-identical across directions (LOGOUT 45.9%, LOGIN 46.6%), so direction is not a confound."
+  - "The SLA target of 100% is reported for context but excluded from severity scoring, because the denominator is an approximation of the policy's trigger population."
+
+requires_columns:
+  - actual_escort
+  - shift_type
+  - month
+  - business_unit
+  - office
+  - vendor_id
+  - product_type
+  - trip_direction
+  - trip_nodal
+  - route_source

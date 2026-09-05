@@ -1,0 +1,65 @@
+# Seat utilisation — riders carried against seats paid for. The empty-seat cost lever.
+#
+# Verified against the trips view (sum(emp_actual) / sum(cab_capacity)):
+#   2026-05  57.93%
+#   2026-06  59.72%
+#   2026-07  59.65%
+#
+# Every point of occupancy is money: the fleet is billed on cabs dispatched, not on seats filled,
+# so this metric and cost_per_trip move together and should be read together.
+id: occupancy
+label: Seat Occupancy
+description: >
+  Riders actually carried as a share of dispatched seat capacity. Ratio of sums, so a full
+  four-seater and a half-empty bus are weighted by the seats each one consumed.
+version: 1
+
+source_view: trips
+formula: "sum(emp_actual) / nullif(sum(cab_capacity), 0)"
+time_column: month
+
+direction: higher_is_better
+unit: rate
+rate_metric: true
+
+sla_key: null
+industry_key: null
+
+min_sample: 500
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source
+  - fuel_type
+
+dimension_sql:
+  vendor: vendor_id
+  fuel_type: actual_cab_fuel_type
+
+coverage_expr: "count(cab_capacity)"
+
+caveats:
+  - "Capacity is the dispatched cab's seat count, not the planned vehicle's. When a vendor substitutes a larger vehicle the occupancy drop is real cost, and attributing it to the vendor rather than to demand is the correct reading."
+  - "Slicing by product_type is essential before drawing any conclusion: BUS and CAB have structurally different occupancy, so an aggregate movement can be pure mix shift between them. The attribution engine separates those two effects explicitly."
+  - "Rows with null or zero capacity are excluded from the denominator and lower reported coverage; none were present in the current extracts."
+
+requires_columns:
+  - emp_actual
+  - cab_capacity
+  - month
+  - business_unit
+  - office
+  - vendor_id
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source
+  - actual_cab_fuel_type

@@ -1,0 +1,64 @@
+# Driver non-compliance rate — the vendor-conduct control metric.
+#
+# Verified against the trips view (avg of is_driver_nc as 1/0):
+#   2026-05  0.156%   coverage 99.998%
+#   2026-06  0.108%   coverage 100%
+#   2026-07  0.121%   coverage 100%
+#
+# The base rate is roughly one trip in 800, and that fact drives min_sample. At the catalog's usual
+# gate of 500 rows a slice would expect fewer than one non-compliant trip, so a single incident
+# would read as a 200% swing and a single quiet month as a total fix. Rare-event rates need a
+# denominator sized to the event, not to the catalog default — 5,000 rows puts roughly six expected
+# events behind every number this metric is allowed to report. This is the same volume-gating
+# principle that suppresses SPOT_2.0 and SHUTTLE, applied to a rate instead of a segment.
+id: driver_noncompliance
+label: Driver Non-Compliance Rate
+description: >
+  Share of trips flagged for driver non-compliance. A rare-event conduct metric with a
+  deliberately high volume gate.
+version: 1
+
+source_view: trips
+formula: "avg(CASE WHEN is_driver_nc THEN 1.0 ELSE 0.0 END)"
+time_column: month
+
+direction: lower_is_better
+unit: rate
+rate_metric: true
+
+sla_key: null
+industry_key: null
+
+# Sized to the ~0.12% base rate, not to the catalog default. See the header note.
+min_sample: 5000
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - product_type
+  - trip_direction
+  - shift_type
+  - route_source
+
+dimension_sql:
+  vendor: vendor_id
+
+coverage_expr: "count(is_driver_nc)"
+
+caveats:
+  - "Base rate is about 0.12% — roughly one trip in 800. min_sample is 5,000 rather than the catalog default of 500 so that a single incident cannot present as a double-digit percentage swing."
+  - "is_driver_nc arrives as a boolean in the June and July ride files but as a string with nulls in May. The trips view reads every ride column as VARCHAR and TRY_CASTs, so the schema drift costs 4 rows of coverage in May instead of dropping the month."
+  - "A null flag is treated as not-non-compliant in the numerator and is visible as reduced coverage. Given 99.998% coverage this is immaterial today, but it is reported rather than assumed."
+
+requires_columns:
+  - is_driver_nc
+  - month
+  - business_unit
+  - office
+  - vendor_id
+  - product_type
+  - trip_direction
+  - shift_type
+  - route_source

@@ -1,0 +1,74 @@
+# P90 delay, conditioned on the trip actually being delayed.
+#
+# OTA measures how OFTEN trips are late. This measures how BAD it is when they are. The pair is
+# what separates "many trips slipped by two minutes" from "a few trips slipped by half an hour",
+# and those two stories demand different actions.
+#
+# The conditioning is not a stylistic choice. 90.2% of trips carry delay_reason = NODELAY and
+# delay_minutes = 0, so the UNCONDITIONED p90 is:
+#   2026-05  0.0    2026-06  2.0    2026-07  0.0
+# A series that is 0, 2, 0 has a MAD of zero, which makes every robust z-score either 0 or
+# infinite and turns the metric into a random alert generator. Conditioned on delay_minutes > 0:
+#   2026-05  23.0 min  n=15,620
+#   2026-06  27.0 min  n=25,180
+#   2026-07  24.0 min  n=19,509
+# That series is stable, comparable across segments, and moves when something real happens.
+id: delay_p90
+label: P90 Delay (delayed trips)
+description: >
+  90th-percentile delay in minutes among trips that were actually delayed. Reports the severity of
+  lateness; pair it with ota, which reports the frequency.
+version: 1
+
+source_view: trips
+formula: "quantile_cont(delay_minutes, 0.9)"
+filter: "delay_minutes > 0"
+time_column: month
+
+direction: lower_is_better
+unit: minutes
+rate_metric: false
+
+# No contractual target for delay severity exists in app.sla, so the SLA frame is reported as
+# explicitly not-applicable rather than compared against an invented number.
+sla_key: null
+industry_key: null
+
+# Roughly a tenth of the trip population survives the filter, so the gate is scaled down
+# proportionally rather than left at the catalog default.
+min_sample: 300
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source
+  - delay_reason
+
+dimension_sql:
+  vendor: vendor_id
+
+coverage_expr: "count(delay_minutes)"
+
+caveats:
+  - "Conditioned on delay_minutes > 0. The unconditioned p90 is 0 in May and July because 90.2% of trips report NODELAY, which makes the unconditioned series unusable for anomaly detection."
+  - "delay_minutes reaches 10,644 (over seven days) in May and 9,197 in June. Outliers are retained, not dropped — a percentile is robust to them, and dropping rows would misstate the sample size. Values above 1,440 minutes are flagged upstream as suspect."
+  - "delay_minutes arrives comma-formatted (\"1,097\") and is TRY_CAST in the view; unparseable values become null and are excluded from the percentile but counted in coverage."
+
+requires_columns:
+  - delay_minutes
+  - month
+  - business_unit
+  - office
+  - vendor_id
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source
+  - delay_reason

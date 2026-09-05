@@ -1,0 +1,62 @@
+# Average billed cost per trip. Defined for every contract type, unlike cost_per_km.
+#
+# Verified against the bills view:
+#   2026-05  1,310.71
+#   2026-06  1,339.44
+#   2026-07  1,355.61
+#
+# The OverHead guard below is worth more than it looks. Without it May reads 1,331.89 instead of
+# 1,310.71 — 160 rows out of 620,942 moving the headline cost figure by 21 rupees a trip, because
+# overhead lines are large and land entirely in the numerator with nothing in the denominator.
+id: cost_per_trip
+label: Cost per Trip
+description: >
+  Total billed cost divided by distinct billed trips. This is the cost metric that is safe to slice
+  on any dimension, because it does not depend on the distance a contract happens to report.
+version: 1
+
+source_view: bills
+# Two guards, both load-bearing:
+#   count(DISTINCT trip_id) — a trip can be billed on several rows (multiple slabs / cycles) and
+#     counting rows would understate the per-trip cost.
+#   FILTER (WHERE trip_id IS NOT NULL) — 160 bill rows carry the literal string 'OverHead' in
+#     trip_id. Those rows have real cost but no trip, so including their cost while excluding them
+#     from the denominator would silently inflate every cost figure in the system.
+formula: "sum(trip_cost) FILTER (WHERE trip_id IS NOT NULL) / nullif(count(DISTINCT trip_id), 0)"
+time_column: month
+
+direction: lower_is_better
+unit: currency
+rate_metric: false
+
+sla_key: null
+industry_key: null
+
+min_sample: 500
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - contract
+  - slab_name
+  - billing_regime
+
+coverage_expr: "count(trip_cost)"
+
+caveats:
+  - "160 bill rows carry trip_id = 'OverHead' — a literal string, not an id. They are excluded from both numerator and denominator here. Any plain CAST of bill_data.trip_id crashes on these rows; the bills view must TRY_CAST."
+  - "Costs are apportioned as billed. A trip billed across multiple cycle rows is counted once in the denominator and summed in the numerator."
+  - "slab_name is absent on roughly a fifth of bill rows; slices on that grain will not reconcile to the total, which is why the un-sliced aggregate is queried separately rather than summed from the parts."
+
+requires_columns:
+  - trip_id
+  - trip_cost
+  - month
+  - business_unit
+  - office
+  - vendor
+  - contract
+  - slab_name
+  - billing_regime

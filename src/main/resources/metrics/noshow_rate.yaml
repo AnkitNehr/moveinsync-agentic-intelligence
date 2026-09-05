@@ -1,0 +1,63 @@
+# No-show rate — planned riders who did not travel. A demand-planning and cost-waste metric.
+#
+# Verified against the trips view (sum(noshow) / sum(emp_planned)):
+#   2026-05  9.44%   44,507 no-shows of 471,575 planned
+#   2026-06  8.07%   42,888 of 531,387
+#   2026-07  5.81%   30,637 of 527,574
+#
+# Note the direction of travel: this is the one headline metric that improved materially over the
+# quarter. A system that only surfaces bad news is not an intelligence layer, so the ranker sees
+# this movement on the same footing as the OTA decline and decides on magnitude, not on mood.
+id: noshow_rate
+label: No-Show Rate
+description: >
+  Share of planned riders who did not board. Computed as a ratio of sums, not a mean of per-trip
+  ratios, so a four-seater with one no-show does not carry the same weight as a fifty-seat bus.
+version: 1
+
+source_view: trips
+formula: "sum(noshow) / nullif(sum(emp_planned), 0)"
+time_column: month
+
+direction: lower_is_better
+unit: rate
+rate_metric: true
+
+sla_key: null
+industry_key: industry.noshow
+
+min_sample: 500
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source
+
+dimension_sql:
+  vendor: vendor_id
+
+coverage_expr: "count(emp_planned)"
+
+caveats:
+  - "Ratio of sums, weighted by planned headcount. The unweighted mean of per-trip no-show rates is a different and much noisier number; the two must not be compared."
+  - "Trips with a null or zero planned headcount contribute nothing to either side of the ratio and lower reported coverage."
+  - "The trip-level noshow_cnt is the source. The per-employee is_no_show flag in the employee extract is a separate population — it includes stwid = 0 placeholder rows, which are not real employees and must be filtered before any per-rider analysis."
+
+requires_columns:
+  - noshow
+  - emp_planned
+  - month
+  - business_unit
+  - office
+  - vendor_id
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source

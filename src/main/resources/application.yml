@@ -1,0 +1,65 @@
+server:
+  port: 8080
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: mobility-intelligence
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+  mvc:
+    async:
+      request-timeout: 600000
+
+app:
+  data:
+    # Directory holding the raw CSV extracts. Filenames contain spaces
+    # (e.g. "Ride_data _trip-may_2026.csv") so globbing is done with Ride_data*.csv.
+    raw-path: ./data/raw
+
+  sla:
+    # On-time arrival target: 95% of campus trips must land within the grace window.
+    ota: 0.95
+    # Escort compliance is a zero-tolerance control.
+    escort-compliance: 1.0
+    # Alerts must be acknowledged within 15 minutes of being raised.
+    alert-ack-minutes: 15
+    # Only meaningful for distance-based contracts; fixed-rate contracts report 0 km.
+    cost-per-km-distance-contracts: 25.0
+
+  industry:
+    # External benchmarks used for peer framing in metric observations.
+    ota: 0.93
+    noshow: 0.06
+
+  scanner:
+    # Volume gate. Segments below this trip count are suppressed to stop tiny
+    # slices (SPOT_2.0 = 702 trips, trip_nodal='SHUTTLE' = 244 trips) producing
+    # bogus double-digit swings.
+    min-sample: 500
+    # Maximum ranked findings carried forward from the scan into attribution.
+    top-n: 20
+    # Delay minutes at or below this value still count as on-time.
+    grace-minutes: 5
+
+  llm:
+    enabled: true
+    triage-model: claude-sonnet-5
+    reasoning-model: claude-opus-5
+    narrative-model: claude-opus-5
+    chat-model: claude-haiku-4-5
+
+  cors:
+    allowed-origins:
+      - http://localhost:4200
+
+logging:
+  level:
+    root: INFO
+    com.moveinsync.mi: INFO

@@ -1,0 +1,67 @@
+# On-Time Arrival — the headline timeliness metric and the one the SLA is written against.
+#
+# Verified against the raw extracts (avg(on_time) over the trips view):
+#   2026-05  95.31%   n=188,992
+#   2026-06  92.46%   n=210,669
+#   2026-07  94.69%   n=215,885
+id: ota
+label: On-Time Arrival
+description: >
+  Share of trips arriving within the grace window. on_time is materialised in the trips view as
+  delay_minutes <= app.scanner.grace-minutes, so the grace threshold is a property of the view and
+  every consumer of this metric agrees on it by construction.
+version: 1
+
+source_view: trips
+formula: "avg(on_time)"
+time_column: month
+
+direction: higher_is_better
+unit: rate
+rate_metric: true
+
+sla_key: sla.ota
+industry_key: industry.ota
+
+# The aggregate is ~190k-215k trips a month, so 500 is generous at the office/vendor grain and
+# still suppresses the tails that produce fake movement (SPOT_2.0 is 702 trips across all three
+# months; trip_nodal = SHUTTLE is 244 and showed a bogus -26.6pt swing before gating).
+min_sample: 500
+
+grains:
+  - global
+  - business_unit
+  - office
+  - vendor
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source
+  - fuel_type
+
+dimension_sql:
+  vendor: vendor_id
+  fuel_type: actual_cab_fuel_type
+
+# Coverage is the share of rows whose delay was parseable at all. It is 1.0 across all three
+# months here, but it is computed rather than assumed so a future extract that degrades is visible.
+coverage_expr: "count(delay_minutes)"
+
+caveats:
+  - "on_time classifies a trip with an unparseable delay_minutes as late. Coverage is reported alongside every value so this assumption is visible rather than silent."
+  - "is_driver_nc / is_cab_nc drift between boolean (Jun, Jul) and string-with-nulls (May) across the monthly ride files; the trips view reads all columns as VARCHAR and TRY_CASTs, so no month is silently dropped."
+
+requires_columns:
+  - on_time
+  - delay_minutes
+  - month
+  - business_unit
+  - office
+  - vendor_id
+  - product_type
+  - trip_direction
+  - shift_type
+  - trip_nodal
+  - route_source
+  - actual_cab_fuel_type
