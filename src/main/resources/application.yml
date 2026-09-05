@@ -82,12 +82,16 @@ app:
     chat-model: claude-haiku-4-5
 
     gemini:
-      # Google renames and retires these faster than a compiled default can track, so a
-      # 404 from the API is fixed here rather than in GeminiClient. Free-tier keys from
-      # aistudio.google.com reach the flash models; the pro models may require billing.
-      cheap-model: gemini-2.0-flash
-      mid-model: gemini-2.0-flash
-      strong-model: gemini-2.5-flash
+      # Google renames and retires these faster than a compiled default can track, which is
+      # why they live here rather than in GeminiClient. Proven by the first live call: the
+      # original gemini-2.0-flash default returned
+      #   404 "This model is no longer available. Please update your code to use
+      #        models/gemini-3.6-flash"
+      # A config edit fixed it; no Java changed. That is the whole argument for keeping
+      # provider details out of code.
+      cheap-model: gemini-3.6-flash
+      mid-model: gemini-3.6-flash
+      strong-model: gemini-3.6-flash
 
   cors:
     allowed-origins:
