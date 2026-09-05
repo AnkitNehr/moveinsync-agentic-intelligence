@@ -306,6 +306,25 @@ export interface MetricSummary {
   caveats: string[];
 }
 
+export interface GlossaryColumn {
+  id: string;
+  table: string;
+  label: string;
+  meaning: string;
+}
+
+export interface GlossaryMetric {
+  id: string;
+  label: string;
+  description: string;
+  sources: GlossaryColumn[];
+}
+
+export interface Glossary {
+  metrics: GlossaryMetric[];
+  columns: GlossaryColumn[];
+}
+
 /** The shape the backend's GlobalExceptionHandler returns on every error. */
 export interface ApiError {
   error: string;

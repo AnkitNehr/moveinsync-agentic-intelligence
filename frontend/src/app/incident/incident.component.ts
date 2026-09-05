@@ -11,10 +11,12 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
+import { GlossaryService } from '../core/glossary.service';
 import type {
   Action,
   AttributionView,
   Contribution,
+  GlossaryMetric,
   Incident,
   MetricObservation,
 } from '../core/models';
@@ -102,6 +104,24 @@ interface WaterfallRow {
           </div>
           <h1>{{ inc.title }}</h1>
           <p class="why"><b>Why now:</b> {{ inc.whyNow }}</p>
+          @if (metricGloss(); as g) {
+            <aside class="gloss">
+              <div class="gloss-kicker">What this metric is</div>
+              <div class="gloss-title">{{ g.label }}</div>
+              <p class="gloss-body">{{ g.description }}</p>
+              @if (g.sources.length) {
+                <ul class="gloss-src">
+                  @for (s of g.sources; track s.id) {
+                    <li>
+                      <span class="src-label">{{ s.label }}</span>
+                      <span class="src-table">{{ s.table }}</span>
+                      — {{ s.meaning }}
+                    </li>
+                  }
+                </ul>
+              }
+            </aside>
+          }
           <p class="detected">
             Detected {{ shortTime(inc.detectedAt) }}
             @if (inc.followUpAt) { &middot; follow-up {{ shortTime(inc.followUpAt) }} }
@@ -121,7 +141,7 @@ interface WaterfallRow {
               <li>
                 <span class="claim">{{ e.claim }}</span>
                 @if (e.metricId) {
-                  <span class="cite mono">{{ e.metricId }}@if (e.entity) {&middot;{{ e.entity }}}</span>
+                  <span class="cite">{{ metricLabel(e.metricId) }}@if (e.entity) { · {{ e.entity }}}</span>
                 }
               </li>
             }
@@ -213,10 +233,12 @@ interface WaterfallRow {
             </div>
           </div>
 
-          <div class="obs-foot num">
-            {{ o.metricId }} &middot; {{ o.grain }}={{ o.entity }} &middot;
-            {{ periodLabel(o.period) }} &middot; value <b>{{ fmtValue(o.value) }}</b> &middot;
-            n={{ num(o.sampleSize) }}
+          <div class="obs-foot">
+            {{ metricLabel(o.metricId) }}
+            &middot; {{ grainLabel(o.grain) }}{{ o.entity && o.entity !== 'ALL' ? ' · ' + o.entity : '' }}
+            &middot; {{ periodLabel(o.period) }}
+            &middot; value <b class="num">{{ fmtValue(o.value) }}</b>
+            &middot; n={{ num(o.sampleSize) }}
           </div>
         } @else {
           <p class="hint">No observation could be loaded for this incident's metric.</p>
@@ -235,7 +257,7 @@ interface WaterfallRow {
           @if (a.winner; as w) {
             <div class="wf-head">
               <div>
-                <span class="wf-dim">{{ w.dimension }}</span>
+                <span class="wf-dim">{{ grainLabel(w.dimension) }}</span>
                 <span class="wf-sub num">
                   explanatory power {{ num(w.explanatoryPower, 2) }} &middot;
                   concentration {{ num(w.concentration, 2) }} &middot;
@@ -254,7 +276,7 @@ interface WaterfallRow {
                  a third, redundant channel — red/green is invisible to a deutan
                  reader (measured CVD dE 4.1), so it is never the only cue. -->
             <div class="waterfall" role="img"
-                 [attr.aria-label]="'Contribution to ' + a.metricId + ' by ' + w.dimension">
+                 [attr.aria-label]="'Contribution to ' + metricLabel(a.metricId) + ' by ' + grainLabel(w.dimension)">
               @for (r of waterfall(); track r.c.entity) {
                 <div class="wf-row">
                   <div class="wf-label" [title]="r.c.entity">{{ r.c.entity }}</div>
@@ -324,7 +346,7 @@ interface WaterfallRow {
                 <tbody>
                   @for (d of a.ranked; track d.dimension) {
                     <tr [class.win]="a.winner && d.dimension === a.winner.dimension">
-                      <td>{{ d.dimension }}</td>
+                      <td>{{ grainLabel(d.dimension) }}</td>
                       <td class="r num">{{ num(d.explanatoryPower, 3) }}</td>
                       <td class="r num">{{ num(d.concentration, 3) }}</td>
                       <td class="r num">{{ num(d.dispersion, 3) }}</td>
@@ -535,6 +557,65 @@ interface WaterfallRow {
         font-size: 13px;
         color: var(--ink-2);
         max-width: 82ch;
+      }
+
+      .gloss {
+        margin: 12px 0 0;
+        padding: 10px 12px;
+        border-radius: var(--radius);
+        border: 1px solid var(--line);
+        background: var(--surface-2);
+        max-width: 82ch;
+      }
+
+      .gloss-kicker {
+        font-size: 10.5px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+      }
+
+      .gloss-title {
+        margin-top: 2px;
+        font-size: 15px;
+        font-weight: 620;
+        color: var(--ink);
+      }
+
+      .gloss-body {
+        margin: 5px 0 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--ink-2);
+      }
+
+      .gloss-src {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .gloss-src li {
+        font-size: 12px;
+        color: var(--ink-2);
+        line-height: 1.4;
+      }
+
+      .src-label {
+        font-weight: 600;
+        color: var(--ink);
+      }
+
+      .src-table {
+        font-size: 10.5px;
+        color: var(--ink-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-left: 4px;
       }
 
       .detected {
@@ -1010,6 +1091,7 @@ interface WaterfallRow {
 })
 export class IncidentComponent implements OnInit, OnChanges {
   private readonly api = inject(ApiService);
+  private readonly glossary = inject(GlossaryService);
 
   @Input() incidentId: string | null = null;
 
@@ -1045,6 +1127,13 @@ export class IncidentComponent implements OnInit, OnChanges {
     }));
   });
 
+  readonly metricGloss = computed<GlossaryMetric | null>(() => {
+    this.glossary.payload();
+    const inc = this.incident();
+    const id = inc?.evidence?.find((e) => !!e.metricId)?.metricId;
+    return this.glossary.metric(id);
+  });
+
   // re-exported for the template
   readonly num = num;
   readonly pct = pct;
@@ -1055,6 +1144,7 @@ export class IncidentComponent implements OnInit, OnChanges {
   readonly severityColor = severityColor;
 
   async ngOnInit(): Promise<void> {
+    await this.glossary.load();
     if (!this.incidentId) void this.loadPicker();
     else void this.load();
   }
@@ -1069,6 +1159,14 @@ export class IncidentComponent implements OnInit, OnChanges {
   select(id: string): void {
     this.incidentId = id;
     void this.load();
+  }
+
+  metricLabel(id: string | null | undefined): string {
+    return this.glossary.metricLabel(id);
+  }
+
+  grainLabel(id: string | null | undefined): string {
+    return this.glossary.grainLabel(id);
   }
 
   clickable(a: Action): boolean {
@@ -1246,6 +1344,7 @@ export class IncidentComponent implements OnInit, OnChanges {
     if (!id) return;
 
     this.error.set(null);
+    await this.glossary.load();
     this.incident.set(null);
     this.observation.set(null);
     this.attribution.set(null);

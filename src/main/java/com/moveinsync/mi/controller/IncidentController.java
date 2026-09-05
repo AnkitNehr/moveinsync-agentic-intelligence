@@ -6,6 +6,7 @@ import com.moveinsync.mi.audit.AuditLog;
 import com.moveinsync.mi.delivery.Communication;
 import com.moveinsync.mi.delivery.DeliveryService;
 import com.moveinsync.mi.delivery.OwnerRouter;
+import com.moveinsync.mi.glossary.OperatorCopy;
 import com.moveinsync.mi.incident.FollowUp;
 import com.moveinsync.mi.incident.FollowUpScheduler;
 import com.moveinsync.mi.incident.IncidentStore;
@@ -60,6 +61,7 @@ public class IncidentController {
     private final AttributionService attribution;
     private final DeliveryService delivery;
     private final FollowUpScheduler followUps;
+    private final OperatorCopy copy;
 
     public IncidentController(
             IncidentStore store,
@@ -67,13 +69,15 @@ public class IncidentController {
             AuditLog auditLog,
             AttributionService attribution,
             DeliveryService delivery,
-            FollowUpScheduler followUps) {
+            FollowUpScheduler followUps,
+            OperatorCopy copy) {
         this.store = store;
         this.actionGuard = actionGuard;
         this.auditLog = auditLog;
         this.attribution = attribution;
         this.delivery = delivery;
         this.followUps = followUps;
+        this.copy = copy;
     }
 
     /** Body for a dismissal. The reason is retained on the suppression and in the audit trail. */
@@ -122,13 +126,15 @@ public class IncidentController {
                         .filter(incident -> status.trim().equalsIgnoreCase(incident.status()))
                         .toList();
 
-        return limit > 0 && filtered.size() > limit ? filtered.subList(0, limit) : filtered;
+        return limit > 0 && filtered.size() > limit
+                ? copy.incidents(filtered.subList(0, limit))
+                : copy.incidents(filtered);
     }
 
     /** One incident. 404 when the id is not in memory. */
     @GetMapping("/{id}")
     public Incident byId(@PathVariable String id) {
-        return store.byId(id).orElseThrow(() -> NotFoundException.of("incident", id, null));
+        return copy.incident(store.byId(id).orElseThrow(() -> NotFoundException.of("incident", id, null)));
     }
 
     /** The scheduled re-check for an incident, if one is pending. 404 when nothing is scheduled. */
@@ -160,7 +166,7 @@ public class IncidentController {
         auditLog.recordDeterministic("operator", AuditLog.STAGE_DELIVER,
                 List.of(id + ":dismissed:" + reason));
         log.info("Incident {} dismissed: {}", id, reason);
-        return dismissed;
+        return copy.incident(dismissed);
     }
 
     /**
@@ -190,7 +196,7 @@ public class IncidentController {
             auditLog.record("operator", AuditLog.STAGE_POLICY, List.of(id + ":escalation_denied"),
                     incident.evidence(), List.of(escalation), List.of(), null, 0L, 0L);
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(new EscalateResponse(incident, escalation, false));
+                    .body(new EscalateResponse(copy.incident(incident), escalation, false));
         }
 
         Incident escalated = withStatus(incident, IncidentStore.STATUS_MONITORING);
@@ -205,7 +211,7 @@ public class IncidentController {
         log.info("Incident {} escalated to {} ({} consecutive periods)",
                 id, escalation.target(), decision == null ? 0 : decision.consecutivePeriods());
 
-        return ResponseEntity.ok(new EscalateResponse(escalated, escalation, true));
+        return ResponseEntity.ok(new EscalateResponse(copy.incident(escalated), escalation, true));
     }
 
     /**
@@ -248,7 +254,7 @@ public class IncidentController {
                 .orElse(null);
         log.info("Incident {} rechecked (period={}): status={} escalations={}",
                 id, period, after.status(), escalations.size());
-        return new RecheckResponse(after, escalations, followUp);
+        return new RecheckResponse(copy.incident(after), copy.incidents(escalations), followUp);
     }
 
     private AttributionResult attributionFor(Incident incident) {

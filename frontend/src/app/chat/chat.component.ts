@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
+import { GlossaryService } from '../core/glossary.service';
 import type { ChatResponse } from '../core/models';
 import { num, usd } from '../core/format';
 
@@ -83,7 +84,7 @@ import { num, usd } from '../core/format';
               <li>
                 <span>{{ c.claim }}</span>
                 @if (c.metricId) {
-                  <span class="cite mono">{{ c.metricId }}@if (c.entity) {&middot;{{ c.entity }}}</span>
+                  <span class="cite">{{ metricLabel(c.metricId) }}@if (c.entity) { · {{ c.entity }}}</span>
                 }
               </li>
             }
@@ -352,6 +353,7 @@ import { num, usd } from '../core/format';
 })
 export class ChatComponent implements OnInit {
   private readonly api = inject(ApiService);
+  private readonly glossary = inject(GlossaryService);
 
   question = '';
   readonly response = signal<ChatResponse | null>(null);
@@ -369,7 +371,11 @@ export class ChatComponent implements OnInit {
   readonly usd = usd;
 
   ngOnInit(): void {
-    /* nothing to preload — the catalog arrives with a declined answer */
+    void this.glossary.load();
+  }
+
+  metricLabel(id: string | null | undefined): string {
+    return this.glossary.metricLabel(id);
   }
 
   useSample(s: string): void {

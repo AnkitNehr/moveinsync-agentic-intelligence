@@ -3,6 +3,7 @@ package com.moveinsync.mi.controller;
 import com.moveinsync.mi.model.Incident;
 import com.moveinsync.mi.model.RunProgress;
 import com.moveinsync.mi.model.RunSummary;
+import com.moveinsync.mi.glossary.OperatorCopy;
 import com.moveinsync.mi.pipeline.PortRegistry;
 import com.moveinsync.mi.pipeline.SenseReasonActPipeline;
 import java.util.List;
@@ -38,10 +39,12 @@ public class RunController {
 
     private final SenseReasonActPipeline pipeline;
     private final PortRegistry ports;
+    private final OperatorCopy copy;
 
-    public RunController(SenseReasonActPipeline pipeline, PortRegistry ports) {
+    public RunController(SenseReasonActPipeline pipeline, PortRegistry ports, OperatorCopy copy) {
         this.pipeline = pipeline;
         this.ports = ports;
+        this.copy = copy;
     }
 
     /**
@@ -90,7 +93,7 @@ public class RunController {
         RunSummary summary = pipeline.latest()
                 .orElseThrow(() -> new NotFoundException(
                         "No run has completed since startup. POST /api/runs to execute one."));
-        return new LatestRun(summary, pipeline.latestIncidents(), ports.tiers(), pipeline.running());
+        return new LatestRun(summary, copy.incidents(pipeline.latestIncidents()), ports.tiers(), pipeline.running());
     }
 
     /**

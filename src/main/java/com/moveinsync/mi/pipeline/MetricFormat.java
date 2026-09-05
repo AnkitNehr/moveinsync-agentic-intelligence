@@ -1,5 +1,6 @@
 package com.moveinsync.mi.pipeline;
 
+import com.moveinsync.mi.glossary.ColumnDictionary;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.metric.MetricDefinition;
 import java.util.Locale;
@@ -28,9 +29,11 @@ import org.springframework.stereotype.Component;
 public class MetricFormat {
 
     private final MetricCatalog catalog;
+    private final ColumnDictionary columns;
 
-    public MetricFormat(MetricCatalog catalog) {
+    public MetricFormat(MetricCatalog catalog, ColumnDictionary columns) {
         this.catalog = catalog;
+        this.columns = columns;
     }
 
     /** Human-readable metric name, falling back to the id when the metric is not in the catalog. */
@@ -115,26 +118,14 @@ public class MetricFormat {
         return Double.isFinite(share) ? "%.1f%%".formatted(share * 100.0) : "n/a";
     }
 
-    /** Plain-English names for the grains, so no writer has to carry its own copy. */
-    private static final java.util.Map<String, String> DIMENSION_NOUNS = java.util.Map.of(
-            "business_unit", "business unit",
-            "trip_direction", "trip direction",
-            "product_type", "vehicle type",
-            "route_source", "route source",
-            "shift_type", "shift",
-            "trip_nodal", "pickup type",
-            "slab_name", "billing slab",
-            "billing_regime", "contract type",
-            "office", "office",
-            "vendor", "vendor");
-
     /**
      * An entity named the way a person would say it: "the 08:00 shift", "the vanta-Aus business unit".
      *
      * <p>Titles were built as {@code "on %s = %s"} and rendered {@code on shift_type = 08:00} — a
      * column name and an equals sign on the first line of every screen, in the product's most-read
      * string. It leaks into the incident list, the brief, the chat advice answer and every LLM
-     * payload that quotes a title, so it is fixed once here rather than per writer.
+     * payload that quotes a title, so it is fixed once here rather than per writer. Grain nouns
+     * come from the data dictionary glossary, not a second private map.
      */
     public String entityPhrase(String dimension, String entity) {
         if (entity == null || entity.isBlank()) {
@@ -143,7 +134,7 @@ public class MetricFormat {
         if (dimension == null || dimension.isBlank() || "global".equalsIgnoreCase(dimension)) {
             return "the fleet overall";
         }
-        String noun = DIMENSION_NOUNS.getOrDefault(dimension, dimension.replace('_', ' '));
+        String noun = columns.label(dimension, dimension);
         // Entities sometimes already carry their category — shift_type has a value literally named
         // "Non Shift", and appending the noun produced "the Non Shift shift". When the name already
         // says what it is, the noun is redundant rather than clarifying.

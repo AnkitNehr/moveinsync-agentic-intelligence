@@ -1,6 +1,7 @@
 import { Component, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ApiService } from './core/api.service';
+import { GlossaryService } from './core/glossary.service';
 import type { Health } from './core/models';
 import { DashboardComponent } from './dashboard/dashboard.component';
 import { IncidentComponent } from './incident/incident.component';
@@ -224,6 +225,7 @@ type Tab = 'dashboard' | 'incident' | 'chat' | 'brief' | 'outbox';
 })
 export class AppComponent implements OnInit {
   private readonly api = inject(ApiService);
+  private readonly glossary = inject(GlossaryService);
 
   readonly tabs: { id: Tab; label: string }[] = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -239,6 +241,7 @@ export class AppComponent implements OnInit {
   readonly healthError = signal<string | null>(null);
 
   async ngOnInit(): Promise<void> {
+    void this.glossary.load();
     try {
       this.health.set(await this.api.health());
     } catch (e) {

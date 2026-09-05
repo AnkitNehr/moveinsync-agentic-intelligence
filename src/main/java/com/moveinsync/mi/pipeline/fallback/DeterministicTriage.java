@@ -170,20 +170,24 @@ public class DeterministicTriage implements TriagePort {
 
     private String rationale(Finding lead, List<Finding> members) {
         if (members.size() == 1) {
-            return ("Single finding: %s on %s=%s. No other slice of %s moved in the same direction far "
+            return ("Single finding: %s for %s. No other slice of %s moved in the same direction far "
                     + "enough to clear both the significance and volume gates.")
-                    .formatted(lead.metricId(), lead.dimension(), lead.entity(), lead.metricId());
+                    .formatted(
+                            format.label(lead.metricId()),
+                            format.entityPhrase(lead.dimension(), lead.entity()),
+                            format.label(lead.metricId()));
         }
         String slices = members.stream()
                 .limit(maxSupportingFindings)
-                .map(f -> "%s=%s (%s)".formatted(
-                        f.dimension(), f.entity(), format.delta(f.metricId(), f.deltaPts())))
+                .map(f -> "%s (%s)".formatted(
+                        format.entityPhrase(f.dimension(), f.entity()),
+                        format.delta(f.metricId(), f.deltaPts())))
                 .collect(Collectors.joining(", "));
 
         return ("Grouped %d findings on %s all moving %s in %s: %s. They are clustered because one "
                 + "operational change surfaces across correlated slices of the same trips; reporting "
                 + "them separately would multiply the alert count without adding a fact.")
-                .formatted(members.size(), lead.metricId(),
+                .formatted(members.size(), format.label(lead.metricId()),
                         lead.deltaPts() < 0 ? "down" : "up", lead.period(), slices);
     }
 }
