@@ -1149,7 +1149,12 @@ public final class BuiltInChatRouter implements ChatPort {
 
         // Token-overlap matching for conversational entities (e.g. "Rohan Travel" -> "Rohan Mikhailov Travel")
         String[] entityTokens = needle.split("\\s+");
-        Set<String> qWords = Set.of(normalisedQuestion.split("\\s+"));
+        // Set.copyOf, not Set.of: Set.of throws IllegalArgumentException on a duplicate element, and
+        // a question is a sentence, so any repeated word blows it up. "What is the cost per trip and
+        // what is the no-show rate" returned HTTP 400 "duplicate element: what" — a crash on
+        // perfectly ordinary English, and the shape a follow-up takes once the previous question is
+        // prepended to it.
+        Set<String> qWords = Set.copyOf(Arrays.asList(normalisedQuestion.split("\\s+")));
 
         int matchedTokens = 0;
         int matchedLength = 0;
