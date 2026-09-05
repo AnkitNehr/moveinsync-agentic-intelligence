@@ -13,8 +13,8 @@ import org.springframework.stereotype.Service;
  * <p>Selection is by credential, not by preference: whichever provider has a usable key wins, and
  * if both do the order below decides. That makes the provider an environment variable rather than a
  * deployment — the same jar runs on Anthropic in one environment and Gemini in another with no
- * rebuild, which is the property the architecture has been claiming all along. Sarvam is the same
- * swap for an OpenAI-compatible Indic endpoint.
+ * rebuild, which is the property the architecture has been claiming all along. Sarvam and NVIDIA
+ * NIM are the same swap for OpenAI-compatible endpoints.
  *
  * <p>If none is available every agentic stage degrades to its deterministic implementation and the
  * pipeline still completes. That is not a failure mode bolted on afterwards; it is the reason the
@@ -35,7 +35,7 @@ public class ModelClientRouter implements ModelClient {
 
         @Override
         public String unavailableReason() {
-            return "no model provider is configured (set ANTHROPIC_API_KEY, GEMINI_API_KEY or SARVAM_API_KEY)";
+            return "no model provider is configured (set ANTHROPIC_API_KEY, GEMINI_API_KEY, SARVAM_API_KEY or NVIDIA_API_KEY)";
         }
 
         @Override
@@ -51,11 +51,11 @@ public class ModelClientRouter implements ModelClient {
 
     private final List<ModelClient> candidates;
 
-    public ModelClientRouter(ClaudeClient claude, GeminiClient gemini, SarvamClient sarvam) {
+    public ModelClientRouter(ClaudeClient claude, GeminiClient gemini, SarvamClient sarvam, NimClient nim) {
         // Anthropic first when more than one provider is funded: the prompts, the cache breakpoint
-        // and the tier price table were all written against it. Gemini and Sarvam keep the agentic
-        // layer alive when Anthropic is not configured.
-        this.candidates = List.of(claude, gemini, sarvam);
+        // and the tier price table were all written against it. The remaining clients keep the
+        // agentic layer alive when Anthropic is not configured.
+        this.candidates = List.of(claude, gemini, sarvam, nim);
 
         ModelClient active = active();
         if (active == NONE) {

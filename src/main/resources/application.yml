@@ -72,7 +72,7 @@ app:
 
   llm:
     # The provider is chosen by which credential is present, not by config. Set
-    # ANTHROPIC_API_KEY, GEMINI_API_KEY or SARVAM_API_KEY in the environment;
+    # ANTHROPIC_API_KEY, GEMINI_API_KEY, SARVAM_API_KEY or NVIDIA_API_KEY;
     # ModelClientRouter picks whichever can actually serve, and falls through to
     # the deterministic path if none can. Set enabled: false to force that path.
     enabled: true
@@ -100,6 +100,15 @@ app:
       cheap-model: sarvam-105b
       mid-model: sarvam-105b
       strong-model: sarvam-105b
+
+    nim:
+      # Hosted NVIDIA NIM at https://integrate.api.nvidia.com/v1/chat/completions.
+      # Catalog ids (e.g. google/gemma-4-31b-it) are swapped here, not in NimClient.
+      # Thinking is off: this app wants JSON/markdown, not chain-of-thought.
+      enable-thinking: false
+      cheap-model: google/gemma-4-31b-it
+      mid-model: google/gemma-4-31b-it
+      strong-model: google/gemma-4-31b-it
 
   cors:
     allowed-origins:

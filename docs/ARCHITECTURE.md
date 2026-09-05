@@ -90,7 +90,7 @@ flowchart TB
 | `incident/` | Memory — dedupe, suppression, follow-up | `IncidentStore` · `FollowUpScheduler` |
 | `agent/` | Judgement, explanation, writing | `TriageAgent` · `ReasoningAgent` · `NarrativeAgent` |
 | `agent/guard/` | Stops invented numbers | `NumericValidator` |
-| `llm/` | Model tiering, caching, token accounting | `ClaudeClient` · `GeminiClient` · `SarvamClient` · `UsageRecorder` |
+| `llm/` | Model tiering, caching, token accounting | `ClaudeClient` · `GeminiClient` · `SarvamClient` · `NimClient` · `UsageRecorder` |
 | `pipeline/` | Orchestration and cadence | `SenseReasonActPipeline` · `CadenceScheduler` |
 | `delivery/` | Persona rendering, channels | `PersonaRenderer` · `NotificationSink` |
 | `audit/` | Who was told what, and why | `AuditLog` |
