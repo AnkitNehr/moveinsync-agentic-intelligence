@@ -125,9 +125,15 @@ app:
       # three pools is the whole benefit per-model metering offers, and it happens to be what the
       # tier split is for anyway: triage is a cheap batched call, narrative is the one worth spending
       # the better model on.
-      cheap-model: gemini-2.5-flash-lite
-      mid-model: gemini-2.5-flash
-      strong-model: gemini-flash-latest
+      # All three tiers on 3.6-flash, not spread across pools.
+      #
+      # The spread was right for the previous key. This one belongs to a newer project, and Google
+      # returns 404 "no longer available to new users" for gemini-2.5-flash and its siblings — the
+      # per-model quota pools only help if the project may call more than one model. Another reason
+      # the id lives in config: which models a key can reach is a property of the key, not the code.
+      cheap-model: gemini-3.6-flash
+      mid-model: gemini-3.6-flash
+      strong-model: gemini-3.6-flash
 
     sarvam:
       # OpenAI-compatible Chat Completions at https://api.sarvam.ai/v1/chat/completions.
