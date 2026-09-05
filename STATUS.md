@@ -72,7 +72,79 @@ curl -X POST localhost:8080/api/runs \
   Your headline claim, as a green test.
 - `SlaPolicyTest` — every breach rule, deterministic and reproducible.
 
-## If something is broken
+---
 
-Check the bottom of this file — the overnight run appends a
-**"What works / what doesn't"** section after the compile-and-boot verification.
+# VERIFIED — what actually works
+
+Everything below was run, not assumed.
+
+## ✅ Builds and tests
+
+```
+mvn compile   BUILD SUCCESS
+mvn test      106 tests · 0 failures · 0 errors · 14 skipped
+```
+
+The skipped 14 are the live-dataset metric tests (conditional on data being present).
+
+Both load-bearing suites pass:
+
+| Suite | Covers |
+|---|---|
+| `MixRateDecomposerTest` | reconciliation · entities in one period · weight handling · rate-vs-mix separation · degenerate input |
+| `SlaPolicyTest` | severity bands · consecutive periods · lower_is_better inversion · robustness |
+
+## ✅ Boots and runs on the real data
+
+App starts in **19.5s**, ingesting all 3.4M rows.
+
+```
+POST /api/runs {"period":"2026-06","priorPeriod":"2026-05"}
+
+615,546 trips → 1,021 series → 20 candidates → 2 incidents   in 6.6s
+```
+
+`GET /api/health` confirms the invariant: **rowsRead == rowsKept == 615,546, droppedRows 0**,
+with 13 auto-generated caveats explaining every quirk in plain English.
+
+## ✅ It found the June story
+
+```
+P1 [CRITICAL] On-Time Arrival fell -4.07 pts on office = Clearwater Campus
+P2 [CRITICAL] Cost per Kilometre fell -31.53 on contract = DV_Package
+```
+
+The P1 incident clustered **19 correlated slices into one alert** and produced:
+
+> *"Scanning all 9 decomposable dimensions, trip_direction explains the movement best.
+> LOGIN (−2.43 pts: −2.41 rate, −0.02 mix). Mix effects account for only 1% of the gross
+> movement, so this is a rate change, not a redistribution of volume. An explanation
+> blaming a shift of volume between entities is not supported by these numbers."*
+
+Note what that last sentence does: the engine **rejected the vendor-mix narrative** we
+originally assumed, because the data doesn't support it. That is the system working.
+
+## 🔧 Two things fixed after the first live run
+
+1. **cost-per-km SLA was a guessed 25.0** against an observed 75–80 range — every unit sat
+   in permanent CRITICAL breach and a cost *decrease* was raised as an incident.
+   Recalibrated to 85.0 from the data (`tools/analysis/sla_baseline.py`).
+2. **189 billing lines carry negative `trip_cost`** (largest −₹2,233,332.99) — credit notes,
+   not trips. They pulled a business unit's cost/km to −21.13. Now excluded from unit cost,
+   retained in total spend. **This quirk is not in the supplied data dictionary.**
+
+## ⚠️ Not yet verified
+
+- **LLM path** — no `ANTHROPIC_API_KEY` in the environment, so only the deterministic
+  fallback has been exercised. Export a key and re-run to light up triage clustering and
+  generated narrative. The app logs the degradation explicitly at startup.
+- **Frontend** — all 18 files written; `npm install` and a browser check still pending.
+- **`docs/FINDINGS.md`** — the synthesis agent is still running.
+
+## Undocumented quirks we found (not in their dictionary)
+
+| Quirk | Count | Impact |
+|---|---|---|
+| `'OverHead'` literal in `bill_data.trip_id` | 160 lines | plain `CAST` crashes; joins to no trip |
+| Negative `trip_cost` (credit notes) | 189 lines, min −2,233,332.99 | drove a BU's cost/km negative |
+| `severity = 'False'` far more common than described | 15,037 rows (29%) | dictionary implied a single stray value |

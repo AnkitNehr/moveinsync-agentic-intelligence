@@ -83,7 +83,10 @@ interface WaterfallRow {
       <section class="panel"><p class="error">{{ error() }}</p></section>
     } @else if (!incident()) {
       <section class="panel"><p class="hint">Loading incident…</p></section>
-    } @else if (incident(); as inc) {
+    } @else {
+      <!-- Angular only permits an "as" binding on a primary @if, never on an
+           @else if — so the alias is opened in a nested primary block here. -->
+      @if (incident(); as inc) {
 
       <!-- ============ header ============ -->
       <section class="panel head">
@@ -390,6 +393,7 @@ interface WaterfallRow {
           <p class="hint idle">No actions were proposed for this incident.</p>
         }
       </section>
+      }
     }
   `,
   styles: [

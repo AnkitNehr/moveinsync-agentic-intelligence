@@ -288,10 +288,14 @@ public class QualityFlagger {
         long sevNull = flags.getOrDefault("alerts_severity_null", 0L);
         long sevFalse = flags.getOrDefault("alerts_severity_false", 0L);
         long alertRows = flags.getOrDefault("alerts_rows", 0L);
-        if (sevNull > 0) {
-            c.add("Alert severity is unusable on " + pct(sevNull, alertRows) + " of alerts ("
-                    + fmt(sevFalse) + " rows contain the literal token 'False'); severity-weighted "
-                    + "views cover the remainder only.");
+        if (sevNull + sevFalse > 0) {
+            // Both failure modes make the column unusable, so the headline percentage has to cover
+            // both. Quoting the null share while attributing it to the 'False' rows understates the
+            // problem and makes the two numbers look like they disagree.
+            c.add("Alert severity is unusable on " + pct(sevNull + sevFalse, alertRows) + " of alerts ("
+                    + fmt(sevNull) + " null, " + fmt(sevFalse)
+                    + " containing the literal token 'False'); severity-weighted views cover the "
+                    + "remaining " + fmt(alertRows - sevNull - sevFalse) + " alerts only.");
         }
         long unack = flags.getOrDefault("alerts_unacknowledged", 0L);
         if (unack > 0) {
