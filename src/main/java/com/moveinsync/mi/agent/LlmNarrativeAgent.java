@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.moveinsync.mi.agent.guard.NumericValidator;
 import com.moveinsync.mi.llm.CachedPrefixBuilder;
 import com.moveinsync.mi.llm.ClaudeClient;
+import com.moveinsync.mi.llm.ModelClient;
 import com.moveinsync.mi.llm.ModelTier;
 import com.moveinsync.mi.model.Action;
 import com.moveinsync.mi.model.Finding;
@@ -42,14 +43,14 @@ public class LlmNarrativeAgent implements NarrativePort {
     private static final int MAX_TOKENS_NARRATIVE = 3000;
     private static final int MAX_TOKENS_BRIEF = 5000;
 
-    private final ClaudeClient claude;
+    private final ModelClient claude;
     private final CachedPrefixBuilder prefix;
     private final NumericValidator validator;
     private final BuiltInNarrator fallback;
     private final ObjectMapper json = new ObjectMapper();
 
     public LlmNarrativeAgent(
-            ClaudeClient claude,
+            ModelClient claude,
             CachedPrefixBuilder prefix,
             NumericValidator validator,
             MetricFormat format) {

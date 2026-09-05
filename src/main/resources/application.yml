@@ -71,11 +71,23 @@ app:
     grace-minutes: 5
 
   llm:
+    # The provider is chosen by which credential is present, not by config. Set
+    # ANTHROPIC_API_KEY or GEMINI_API_KEY in the environment; ModelClientRouter picks
+    # whichever can actually serve, and falls through to the deterministic path if
+    # neither can. Set enabled: false to force the deterministic path deliberately.
     enabled: true
     triage-model: claude-sonnet-5
     reasoning-model: claude-opus-5
     narrative-model: claude-opus-5
     chat-model: claude-haiku-4-5
+
+    gemini:
+      # Google renames and retires these faster than a compiled default can track, so a
+      # 404 from the API is fixed here rather than in GeminiClient. Free-tier keys from
+      # aistudio.google.com reach the flash models; the pro models may require billing.
+      cheap-model: gemini-2.0-flash
+      mid-model: gemini-2.0-flash
+      strong-model: gemini-2.5-flash
 
   cors:
     allowed-origins:

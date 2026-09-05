@@ -4,7 +4,7 @@ import com.moveinsync.mi.incident.IncidentStore;
 import com.moveinsync.mi.ingest.DuckDbService;
 import com.moveinsync.mi.ingest.IngestReport;
 import com.moveinsync.mi.ingest.QualityFlagger;
-import com.moveinsync.mi.llm.ClaudeClient;
+import com.moveinsync.mi.llm.ModelClient;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.pipeline.CadenceScheduler;
 import com.moveinsync.mi.pipeline.PortRegistry;
@@ -44,7 +44,7 @@ public class HealthController {
     private final PortRegistry ports;
     private final SenseReasonActPipeline pipeline;
     private final CadenceScheduler cadence;
-    private final ObjectProvider<ClaudeClient> claudeProvider;
+    private final ObjectProvider<ModelClient> claudeProvider;
 
     public HealthController(
             DuckDbService duckDb,
@@ -54,7 +54,7 @@ public class HealthController {
             PortRegistry ports,
             SenseReasonActPipeline pipeline,
             CadenceScheduler cadence,
-            ObjectProvider<ClaudeClient> claudeProvider) {
+            ObjectProvider<ModelClient> claudeProvider) {
         this.duckDb = duckDb;
         this.qualityFlagger = qualityFlagger;
         this.catalog = catalog;
@@ -120,10 +120,10 @@ public class HealthController {
         }
 
         IngestReport ingest = safeReport();
-        ClaudeClient claude = claudeProvider.getIfAvailable();
+        ModelClient claude = claudeProvider.getIfAvailable();
         boolean llmAvailable = claude != null && claude.isAvailable();
         String llmReason = claude == null
-                ? "No ClaudeClient bean is registered; every agentic stage runs deterministically."
+                ? "No model provider is registered; every agentic stage runs deterministically."
                 : claude.unavailableReason();
 
         return new Health(

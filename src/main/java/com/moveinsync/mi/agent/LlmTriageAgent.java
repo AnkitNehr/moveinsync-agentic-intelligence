@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.moveinsync.mi.llm.CachedPrefixBuilder;
 import com.moveinsync.mi.llm.ClaudeClient;
+import com.moveinsync.mi.llm.ModelClient;
 import com.moveinsync.mi.llm.ModelTier;
 import com.moveinsync.mi.model.Finding;
 import com.moveinsync.mi.pipeline.MetricFormat;
@@ -53,14 +54,14 @@ public class LlmTriageAgent implements TriagePort {
     /** Candidates handed to the model. Beyond this the marginal finding is noise. */
     private static final int MAX_CANDIDATES = 20;
 
-    private final ClaudeClient claude;
+    private final ModelClient claude;
     private final CachedPrefixBuilder prefix;
     private final MetricFormat format;
     private final DeterministicTriage fallback;
     private final ObjectMapper json = new ObjectMapper();
 
     public LlmTriageAgent(
-            ClaudeClient claude,
+            ModelClient claude,
             CachedPrefixBuilder prefix,
             MetricFormat format,
             DeterministicTriage fallback) {

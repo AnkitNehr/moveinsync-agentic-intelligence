@@ -8,6 +8,7 @@ import com.moveinsync.mi.agent.guard.NumericValidator;
 import com.moveinsync.mi.attribution.AttributionResult;
 import com.moveinsync.mi.llm.CachedPrefixBuilder;
 import com.moveinsync.mi.llm.ClaudeClient;
+import com.moveinsync.mi.llm.ModelClient;
 import com.moveinsync.mi.llm.ModelTier;
 import com.moveinsync.mi.model.Contribution;
 import com.moveinsync.mi.model.Evidence;
@@ -45,7 +46,7 @@ public class LlmReasoningAgent implements ReasoningPort {
     private static final int MAX_TOKENS = 6000;
     private static final int MAX_CONTRIBUTIONS = 8;
 
-    private final ClaudeClient claude;
+    private final ModelClient claude;
     private final CachedPrefixBuilder prefix;
     private final MetricFormat format;
     private final NumericValidator validator;
@@ -53,7 +54,7 @@ public class LlmReasoningAgent implements ReasoningPort {
     private final ObjectMapper json = new ObjectMapper();
 
     public LlmReasoningAgent(
-            ClaudeClient claude,
+            ModelClient claude,
             CachedPrefixBuilder prefix,
             MetricFormat format,
             NumericValidator validator,

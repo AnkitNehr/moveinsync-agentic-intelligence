@@ -47,9 +47,14 @@ import org.springframework.stereotype.Service;
  * removed on the model ids in {@link ModelTier} and sending any of them returns a 400.
  */
 @Service
-public class ClaudeClient {
+public class ClaudeClient implements ModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(ClaudeClient.class);
+
+    @Override
+    public String providerName() {
+        return "anthropic";
+    }
 
     /** Environment variable the SDK reads for the API key. */
     public static final String API_KEY_ENV = "ANTHROPIC_API_KEY";
