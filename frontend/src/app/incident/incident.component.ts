@@ -390,6 +390,21 @@ interface WaterfallRow {
         <h2>Recommended actions</h2>
 
         @if (inc.policy; as p) {
+          <!-- Why this incident exists, before the rule codes. An incident opens either because a
+               contractual target was broken or because the measure moved far outside its own normal
+               range with no target in play. Both deserve attention and they call for different
+               responses, but the panel used to show "Severity MAJOR" beside "Not breached · band
+               NONE" and leave the reader to reconcile them — which reads as the system contradicting
+               itself rather than as the distinction it is. -->
+          <p class="policy-basis" [class.contractual]="p.breached">
+            <strong>{{ p.breached ? 'Contractual breach.' : 'Not a contractual breach.' }}</strong>
+            {{ p.breached
+                ? 'A target was agreed for this measure and it is being missed, so the escalation
+                   ladder applies.'
+                : 'No agreed target is being missed. This was raised because the movement is far
+                   outside what this measure normally does, which is worth investigating but is not
+                   grounds for escalating to a vendor.' }}
+          </p>
           <div class="policy num">
             <span class="tag mono">{{ p.ruleId }}</span>
             <span>
@@ -919,6 +934,21 @@ interface WaterfallRow {
       }
 
       /* ---- actions ---- */
+      /* The plain-English basis leads; the rule codes sit under it as provenance. */
+      .policy-basis {
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border-left: 3px solid var(--ink-muted);
+        background: color-mix(in srgb, var(--ink-muted) 8%, transparent);
+        border-radius: 0 6px 6px 0;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .policy-basis.contractual {
+        border-left-color: var(--critical);
+        background: color-mix(in srgb, var(--critical) 8%, transparent);
+      }
+
       .policy {
         display: flex;
         align-items: center;

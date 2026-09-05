@@ -125,11 +125,26 @@ public class DeterministicTriage implements TriagePort {
     private String whyNow(Finding lead, int memberCount) {
         StringBuilder reason = new StringBuilder();
 
+        // An incident opens for one of two reasons, and the reader has to be told which.
+        //
+        // Either a contractual target was broken, or the measure moved far outside its own normal
+        // range with no target in play at all. Both are worth a manager's attention and they call
+        // for different responses — one is a breach you can escalate, the other is a signal you
+        // investigate. The console showed "Severity MAJOR" beside "not breached · band NONE" and
+        // left the reader to reconcile the two, which reads as a contradiction rather than as the
+        // distinction it actually is.
         Sla sla = lead.observation() == null ? null : lead.observation().references().sla();
         if (sla != null && sla.breached() && sla.target() != null) {
             reason.append("Now at %s against a target of %s. ".formatted(
                     format.value(lead.metricId(), lead.current()),
                     format.value(lead.metricId(), sla.target())));
+        } else if (sla == null || sla.target() == null) {
+            reason.append("No contractual target is set for this measure, so this is raised on the "
+                    + "size of the movement rather than on a broken promise. ");
+        } else {
+            reason.append("Still inside its target of %s, so this is raised on the size of the "
+                    .formatted(format.value(lead.metricId(), sla.target()))
+                    + "movement rather than on a breach. ");
         }
 
         if (Double.isFinite(lead.robustZ()) && Math.abs(lead.robustZ()) >= NOTABLE_Z) {
