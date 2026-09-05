@@ -78,8 +78,8 @@ Full package map and per-stage timings: **[docs/ARCHITECTURE.md](docs/ARCHITECTU
 
 ## Quickstart
 
-Requires **JDK 21+** (JDK 26 works), **Maven 3.9+**, **Node 20+**. No database, no Docker, no
-cloud account — DuckDB runs in-process and the dataset is read straight from CSV.
+Requires **JDK 21+** (JDK 26 works), **Maven 3.9+**, **Node 20+** — or **Docker** (see below).
+No database and no cloud account: DuckDB runs in-process and the dataset is read straight from CSV.
 
 ```bash
 cd "moveinsync assesment"
@@ -123,6 +123,26 @@ mvn test
 #  MixRateDecomposerTest — contributions sum to the observed delta within 1e-9
 #  SlaPolicyTest         — every breach rule, deterministic and reproducible
 #  NoLlmInCoreTest       — no Anthropic import anywhere in the deterministic core
+```
+
+### Docker
+
+The CSVs stay on the host (`data/raw/`, gitignored) and are mounted read-only into the API
+container. LLM keys are optional; copy `.env.example` to `.env` if you want a provider.
+
+```bash
+# data/raw/ must already contain the 7 extracts
+docker compose up --build
+```
+
+Then open **http://localhost:4200**. The console is proxied to the API on **http://localhost:8080**,
+so the curl examples above work unchanged. Give the API a couple of minutes on first boot — ingest
+loads millions of rows before `/api/health` reports `datasetReady: true`.
+
+```bash
+docker compose up --build -d          # detached
+docker compose logs -f api           # ingest progress
+docker compose down
 ```
 
 ### Running without a key

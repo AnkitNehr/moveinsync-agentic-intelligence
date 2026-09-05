@@ -53,7 +53,7 @@ export class ApiService {
       // Network-level failure: the backend is almost certainly not running.
       throw new HttpError(
         0,
-        'Cannot reach the API on :8080. Is the Spring Boot backend running?',
+        'Cannot reach the API. Is the backend running (or is Docker Compose up)?',
         null,
       );
     }
