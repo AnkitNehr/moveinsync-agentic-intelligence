@@ -95,6 +95,43 @@ export interface Action {
   reason: string;
 }
 
+export interface Communication {
+  id: string;
+  incidentId: string;
+  actionType: string;
+  persona: string;
+  channel: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  status: string;
+  blockedReason: string | null;
+  createdAt: string;
+}
+
+export interface EscalateResponse {
+  incident: Incident;
+  action: Action;
+  escalated: boolean;
+}
+
+export interface RecheckResponse {
+  incident: Incident;
+  escalations: Incident[];
+  followUp: FollowUp | null;
+}
+
+export interface FollowUp {
+  incidentId: string;
+  metricId: string | null;
+  dimension: string | null;
+  entity: string | null;
+  period: string | null;
+  dueAt: string;
+  status: string;
+  note: string | null;
+}
+
 export interface PolicyDecision {
   ruleId: string;
   breached: boolean;

@@ -6,6 +6,8 @@ import com.moveinsync.mi.anomaly.RankingContext;
 import com.moveinsync.mi.attribution.AttributionResult;
 import com.moveinsync.mi.attribution.AttributionService;
 import com.moveinsync.mi.audit.AuditLog;
+import com.moveinsync.mi.delivery.Communication;
+import com.moveinsync.mi.delivery.DeliveryService;
 import com.moveinsync.mi.incident.IncidentStore;
 import com.moveinsync.mi.ingest.DuckDbService;
 import com.moveinsync.mi.ingest.IngestReport;
@@ -119,6 +121,7 @@ public class SenseReasonActPipeline {
     private final SlaPolicy slaPolicy;
     private final ActionGuard actionGuard;
     private final IncidentStore incidents;
+    private final DeliveryService delivery;
     private final AuditLog auditLog;
     private final UsageRecorder usage;
     private final PortRegistry ports;
@@ -144,6 +147,7 @@ public class SenseReasonActPipeline {
             SlaPolicy slaPolicy,
             ActionGuard actionGuard,
             IncidentStore incidents,
+            DeliveryService delivery,
             AuditLog auditLog,
             UsageRecorder usage,
             PortRegistry ports,
@@ -160,6 +164,7 @@ public class SenseReasonActPipeline {
         this.slaPolicy = slaPolicy;
         this.actionGuard = actionGuard;
         this.incidents = incidents;
+        this.delivery = delivery;
         this.auditLog = auditLog;
         this.usage = usage;
         this.ports = ports;
@@ -315,6 +320,9 @@ public class SenseReasonActPipeline {
         // ---- 6-9. reason, narrate, guard, persist --------------------------------------------------
         Map<String, AttributionResult> attributions = new HashMap<>();
         List<Incident> opened = new ArrayList<>(drafts.size());
+        List<String> deliveredTo = new ArrayList<>();
+        deliveredTo.add("console");
+        deliveredTo.add("api");
 
         for (TriagePort.IncidentDraft draft : drafts) {
             List<Finding> members = draft.findingIds().stream()
@@ -338,7 +346,7 @@ public class SenseReasonActPipeline {
             Incident skeleton = draft(draft, lead, members, decision, explanation, period, startedAt);
 
             List<Action> actions = ledger.time(STAGE_GUARD, () ->
-                    actionGuard.permittedActions(skeleton, decision));
+                    actionGuard.permittedActions(skeleton, decision, attributed));
 
             Incident governed = withActions(skeleton, actions);
 
@@ -347,11 +355,17 @@ public class SenseReasonActPipeline {
 
             Incident finished = preserveOperatorStatus(withNarrative(governed, narrative));
 
-            ledger.time(STAGE_PERSIST, () -> {
+            List<Communication> delivered = ledger.time(STAGE_PERSIST, () -> {
                 incidents.open(finished);
-                incidents.scheduleFollowUp(finished.id(), followUpDays, startedAt);
-                return null;
+                incidents.scheduleFollowUp(finished.id(), followUpDays, startedAt, period);
+                return delivery.publish(finished, attributed);
             });
+            if (delivered != null) {
+                delivered.stream()
+                        .map(Communication::recipient)
+                        .filter(r -> r != null && !r.isBlank())
+                        .forEach(deliveredTo::add);
+            }
 
             auditLog.record(runId, AuditLog.STAGE_NARRATE, List.of(finished.id()),
                     finished.evidence(), finished.recommendedActions(), List.of(),
@@ -370,7 +384,7 @@ public class SenseReasonActPipeline {
                     opened.stream().map(Incident::id).toList(),
                     opened.stream().flatMap(incident -> incident.evidence().stream()).limit(32).toList(),
                     opened.stream().flatMap(incident -> incident.recommendedActions().stream()).toList(),
-                    List.of("console", "api"),
+                    deliveredTo.stream().distinct().toList(),
                     ports.reasoning().tier(),
                     snapshot.promptTokens(),
                     snapshot.completionTokens());

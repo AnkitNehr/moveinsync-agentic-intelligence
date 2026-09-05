@@ -6,11 +6,12 @@ import { DashboardComponent } from './dashboard/dashboard.component';
 import { IncidentComponent } from './incident/incident.component';
 import { ChatComponent } from './chat/chat.component';
 import { BriefComponent } from './brief/brief.component';
+import { OutboxComponent } from './outbox/outbox.component';
 
-type Tab = 'dashboard' | 'incident' | 'chat' | 'brief';
+type Tab = 'dashboard' | 'incident' | 'chat' | 'brief' | 'outbox';
 
 /**
- * Root shell. Four tabs, no router — the console is one page and a router would
+ * Root shell. Five tabs, no router — the console is one page and a router would
  * add a dependency and a URL contract for no operational gain.
  *
  * The selected incident id lives here rather than in a store so the dashboard
@@ -26,6 +27,7 @@ type Tab = 'dashboard' | 'incident' | 'chat' | 'brief';
     IncidentComponent,
     ChatComponent,
     BriefComponent,
+    OutboxComponent,
   ],
   template: `
     <header class="top">
@@ -87,6 +89,9 @@ type Tab = 'dashboard' | 'incident' | 'chat' | 'brief';
         }
         @case ('brief') {
           <mi-brief />
+        }
+        @case ('outbox') {
+          <mi-outbox />
         }
       }
     </main>
@@ -225,6 +230,7 @@ export class AppComponent implements OnInit {
     { id: 'incident', label: 'Incident' },
     { id: 'chat', label: 'Chat' },
     { id: 'brief', label: 'Brief' },
+    { id: 'outbox', label: 'Outbox' },
   ];
 
   readonly tab = signal<Tab>('dashboard');

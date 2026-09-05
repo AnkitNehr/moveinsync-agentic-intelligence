@@ -185,6 +185,9 @@ interface Kpi {
 
                   <span class="meta">
                     {{ i.findingIds.length }} finding{{ i.findingIds.length === 1 ? '' : 's' }}
+                    @if (routedTo(i); as dest) {
+                      &middot; routed to {{ dest }}
+                    }
                     @if (i.quality) {
                       &middot; {{ i.quality.confidence }} confidence
                       &middot; <span class="num">{{ (i.quality.coverage * 100).toFixed(1) }}%</span> coverage
@@ -580,6 +583,11 @@ export class DashboardComponent implements OnInit {
   readonly periodLabel = periodLabel;
   readonly shortTime = shortTime;
   readonly severityColor = severityColor;
+
+  routedTo(i: Incident): string | null {
+    const notify = i.recommendedActions?.find((a) => a.type === 'notify');
+    return notify?.target ?? null;
+  }
 
   async ngOnInit(): Promise<void> {
     void this.loadHealth();

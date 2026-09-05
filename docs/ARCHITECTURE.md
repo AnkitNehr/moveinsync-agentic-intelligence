@@ -49,6 +49,7 @@ flowchart TB
         U2["Incident<br/>⭐ attribution waterfall"]:::ui
         U3["Chat"]:::ui
         U4["Brief"]:::ui
+        U5["Outbox"]:::ui
     end
     REST["<b>controller/</b> — 7 REST endpoints"]:::rest
 
@@ -92,10 +93,10 @@ flowchart TB
 | `agent/guard/` | Stops invented numbers | `NumericValidator` |
 | `llm/` | Model tiering, caching, token accounting | `ClaudeClient` · `GeminiClient` · `SarvamClient` · `NimClient` · `UsageRecorder` |
 | `pipeline/` | Orchestration and cadence | `SenseReasonActPipeline` · `CadenceScheduler` |
-| `delivery/` | Persona rendering, channels | `PersonaRenderer` · `NotificationSink` |
+| `delivery/` | Outbox, owner routing, console sink | `DeliveryService` · `OutboxStore` · `OwnerRouter` · `NotificationSink` |
 | `audit/` | Who was told what, and why | `AuditLog` |
-| `controller/` | 7 REST endpoints | `RunController` · `IncidentController` · … |
-| `frontend/` | Angular console | 4 standalone components |
+| `controller/` | REST: runs, incidents, outbox, follow-ups, chat, briefs | `RunController` · `IncidentController` · `OutboxController` · … |
+| `frontend/` | Angular console | dashboard · incident · chat · brief · outbox |
 
 ---
 
@@ -129,9 +130,10 @@ POST /api/runs {"period":"2026-06-01","priorPeriod":"2026-05-01"}
 **Everything before ⑧ is free.** The model enters at step 8 and sees ~4KB of
 already-computed JSON — never a trip row.
 
-Three days later `FollowUpScheduler` fires, re-runs the metric, and if it hasn't
-recovered raises an escalation **without being asked**. That loop is what makes this
-agentic rather than a report generator.
+Three days later `FollowUpScheduler` re-measures a **later** period (not the month that already
+failed). From the console, `POST /api/incidents/{id}/recheck` with `{"period":"2026-07"}` fires
+that loop on demand. Recovery writes a quiet close to the outbox; a continuing breach raises an
+`ESCALATED:` incident and a higher-urgency draft. Vendor letters still require attribution evidence.
 
 ---
 

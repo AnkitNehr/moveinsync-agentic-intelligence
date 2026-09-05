@@ -58,9 +58,9 @@ public class NimClient implements ModelClient {
             UsageRecorder usage,
             @Value("${app.llm.enabled:true}") boolean enabled,
             @Value("${app.llm.nim.enable-thinking:false}") boolean enableThinking,
-            @Value("${app.llm.nim.cheap-model:google/gemma-4-31b-it}") String cheapModel,
-            @Value("${app.llm.nim.mid-model:google/gemma-4-31b-it}") String midModel,
-            @Value("${app.llm.nim.strong-model:google/gemma-4-31b-it}") String strongModel) {
+            @Value("${app.llm.nim.cheap-model:nvidia/nemotron-3.5-lightning-30b-a3b}") String cheapModel,
+            @Value("${app.llm.nim.mid-model:nvidia/nemotron-3.5-lightning-30b-a3b}") String midModel,
+            @Value("${app.llm.nim.strong-model:nvidia/nemotron-3.5-lightning-30b-a3b}") String strongModel) {
         this.usage = usage;
         this.enabled = enabled;
         this.enableThinking = enableThinking;
@@ -137,7 +137,12 @@ public class NimClient implements ModelClient {
             }
             messages.add(textMessage("user", userContent));
 
-            body.putObject("chat_template_kwargs").put("enable_thinking", enableThinking);
+            body.putObject("chat_template_kwargs")
+                    .put("enable_thinking", enableThinking)
+                    .put("thinking", enableThinking);
+            if (!enableThinking) {
+                body.put("reasoning_effort", "low");
+            }
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(ENDPOINT))

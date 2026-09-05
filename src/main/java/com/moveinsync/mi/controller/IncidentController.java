@@ -1,12 +1,19 @@
 package com.moveinsync.mi.controller;
 
+import com.moveinsync.mi.attribution.AttributionResult;
+import com.moveinsync.mi.attribution.AttributionService;
 import com.moveinsync.mi.audit.AuditLog;
+import com.moveinsync.mi.delivery.Communication;
+import com.moveinsync.mi.delivery.DeliveryService;
+import com.moveinsync.mi.delivery.OwnerRouter;
 import com.moveinsync.mi.incident.FollowUp;
+import com.moveinsync.mi.incident.FollowUpScheduler;
 import com.moveinsync.mi.incident.IncidentStore;
 import com.moveinsync.mi.model.Action;
 import com.moveinsync.mi.model.Incident;
 import com.moveinsync.mi.model.PolicyDecision;
 import com.moveinsync.mi.policy.ActionGuard;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -50,11 +57,23 @@ public class IncidentController {
     private final IncidentStore store;
     private final ActionGuard actionGuard;
     private final AuditLog auditLog;
+    private final AttributionService attribution;
+    private final DeliveryService delivery;
+    private final FollowUpScheduler followUps;
 
-    public IncidentController(IncidentStore store, ActionGuard actionGuard, AuditLog auditLog) {
+    public IncidentController(
+            IncidentStore store,
+            ActionGuard actionGuard,
+            AuditLog auditLog,
+            AttributionService attribution,
+            DeliveryService delivery,
+            FollowUpScheduler followUps) {
         this.store = store;
         this.actionGuard = actionGuard;
         this.auditLog = auditLog;
+        this.attribution = attribution;
+        this.delivery = delivery;
+        this.followUps = followUps;
     }
 
     /** Body for a dismissal. The reason is retained on the suppression and in the audit trail. */
@@ -73,6 +92,12 @@ public class IncidentController {
      * @param escalated whether the escalation actually went ahead
      */
     public record EscalateResponse(Incident incident, Action action, boolean escalated) {
+    }
+
+    public record RecheckRequest(String period, String asOf) {
+    }
+
+    public record RecheckResponse(Incident incident, List<Incident> escalations, FollowUp followUp) {
     }
 
     /**
@@ -153,7 +178,8 @@ public class IncidentController {
                 .orElseThrow(() -> NotFoundException.of("incident", id, null));
 
         PolicyDecision decision = incident.policy();
-        Action escalation = actionGuard.permittedActions(incident, decision).stream()
+        AttributionResult attributed = attributionFor(incident);
+        Action escalation = actionGuard.permittedActions(incident, decision, attributed).stream()
                 .filter(action -> ActionGuard.VENDOR_ESCALATION.equalsIgnoreCase(action.type()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
@@ -180,6 +206,63 @@ public class IncidentController {
                 id, escalation.target(), decision == null ? 0 : decision.consecutivePeriods());
 
         return ResponseEntity.ok(new EscalateResponse(escalated, escalation, true));
+    }
+
+    /**
+     * Drafts and sends a notify to the routed owner. Always permitted; this is the operator forcing
+     * a copy into the outbox.
+     */
+    @PostMapping("/{id}/notify")
+    public Communication notifyOwner(@PathVariable String id) {
+        Incident incident = store.byId(id)
+                .orElseThrow(() -> NotFoundException.of("incident", id, null));
+        Communication sent = delivery.notifyNow(incident, attributionFor(incident));
+        auditLog.recordDeterministic("operator", AuditLog.STAGE_DELIVER, List.of(id + ":notified"));
+        return sent;
+    }
+
+    /**
+     * Fires this incident's follow-up immediately. Pass {@code period} (e.g. {@code 2026-07}) to
+     * re-measure a later month on stage.
+     */
+    @PostMapping("/{id}/recheck")
+    public RecheckResponse recheck(
+            @PathVariable String id,
+            @RequestBody(required = false) RecheckRequest request) {
+
+        store.byId(id).orElseThrow(() -> NotFoundException.of("incident", id, null));
+        Instant asOf = Instant.now();
+        if (request != null && request.asOf() != null && !request.asOf().isBlank()) {
+            try {
+                asOf = Instant.parse(request.asOf());
+            } catch (RuntimeException ignored) {
+                asOf = Instant.now();
+            }
+        }
+        String period = request == null ? null : request.period();
+        List<Incident> escalations = followUps.recheckNow(id, asOf, period);
+        Incident after = store.byId(id).orElseThrow(() -> NotFoundException.of("incident", id, null));
+        FollowUp followUp = store.allFollowUps().stream()
+                .filter(item -> id.equals(item.incidentId()))
+                .findFirst()
+                .orElse(null);
+        log.info("Incident {} rechecked (period={}): status={} escalations={}",
+                id, period, after.status(), escalations.size());
+        return new RecheckResponse(after, escalations, followUp);
+    }
+
+    private AttributionResult attributionFor(Incident incident) {
+        String metric = OwnerRouter.firstMetric(incident);
+        String period = IncidentStore.originPeriodOf(incident, null);
+        if (metric == null || period == null) {
+            return AttributionResult.empty(metric, period, null);
+        }
+        try {
+            return attribution.attribute(metric, period, FollowUpScheduler.priorPeriod(period));
+        } catch (RuntimeException e) {
+            log.warn("Attribution for incident {} failed: {}", incident.id(), e.toString());
+            return AttributionResult.empty(metric, period, FollowUpScheduler.priorPeriod(period));
+        }
     }
 
     /** Status transitions rebuild the record: {@link Incident} is immutable by design. */

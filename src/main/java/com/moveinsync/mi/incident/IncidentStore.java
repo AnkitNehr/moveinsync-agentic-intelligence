@@ -150,7 +150,7 @@ public class IncidentStore {
             incidents.put(incident.id(), incident);
             Instant due = parseInstant(incident.followUpAt());
             if (due != null && !followUps.containsKey(incident.id())) {
-                followUps.put(incident.id(), buildFollowUp(incident, due));
+                followUps.put(incident.id(), buildFollowUp(incident, due, originPeriodOf(incident, null)));
             }
             persist();
             return incident;
@@ -305,16 +305,56 @@ public class IncidentStore {
 
     /** Schedules a re-check relative to an explicit base instant. */
     public Optional<FollowUp> scheduleFollowUp(String incidentId, int days, Instant from) {
+        return scheduleFollowUp(incidentId, days, from, null);
+    }
+
+    /**
+     * Schedules a re-check, capturing the originating period so the loop can re-measure a
+     * <em>later</em> month rather than the month that already failed.
+     */
+    public Optional<FollowUp> scheduleFollowUp(String incidentId, int days, Instant from, String originPeriod) {
         synchronized (lock) {
             Incident incident = incidentId == null ? null : incidents.get(incidentId);
             if (incident == null) {
                 return Optional.empty();
             }
             Instant base = from == null ? Instant.now() : from;
-            FollowUp followUp = buildFollowUp(incident, base.plus(Math.max(0, days), ChronoUnit.DAYS));
+            FollowUp followUp = buildFollowUp(
+                    incident,
+                    base.plus(Math.max(0, days), ChronoUnit.DAYS),
+                    originPeriod);
             followUps.put(incidentId, followUp);
             persist();
             return Optional.of(followUp);
+        }
+    }
+
+    /**
+     * Makes a pending follow-up due immediately so the console can fire the loop without waiting
+     * for the calendar. A completed follow-up is re-opened as pending at {@code now}.
+     */
+    public Optional<FollowUp> markDue(String incidentId, Instant now) {
+        synchronized (lock) {
+            Incident incident = incidentId == null ? null : incidents.get(incidentId);
+            if (incident == null) {
+                return Optional.empty();
+            }
+            Instant due = now == null ? Instant.now() : now;
+            FollowUp existing = followUps.get(incidentId);
+            FollowUp dueNow = existing == null
+                    ? buildFollowUp(incident, due, originPeriodOf(incident, null))
+                    : new FollowUp(
+                            existing.incidentId(),
+                            existing.metricId(),
+                            existing.dimension(),
+                            existing.entity(),
+                            existing.period(),
+                            due,
+                            FollowUp.PENDING,
+                            existing.note());
+            followUps.put(incidentId, dueNow);
+            persist();
+            return Optional.of(dueNow);
         }
     }
 
@@ -351,16 +391,35 @@ public class IncidentStore {
 
     // ---- internals ------------------------------------------------------------------------------
 
-    private FollowUp buildFollowUp(Incident incident, Instant dueAt) {
+    private FollowUp buildFollowUp(Incident incident, Instant dueAt, String originPeriod) {
         return new FollowUp(
                 incident.id(),
                 firstEvidenceMetric(incident),
                 null,
                 firstEvidenceEntity(incident),
-                null,
+                originPeriodOf(incident, originPeriod),
                 dueAt,
                 FollowUp.PENDING,
                 null);
+    }
+
+    /**
+     * Prefer an explicit origin period, then the {@code yyyy-MM} suffix on the incident id
+     * ({@code inc-ota-2026-06}), then nothing — the scheduler will refuse to re-measure the
+     * originating month once a later period exists.
+     */
+    public static String originPeriodOf(Incident incident, String explicit) {
+        if (explicit != null && explicit.matches("\\d{4}-\\d{2}")) {
+            return explicit;
+        }
+        if (incident != null && incident.id() != null) {
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern.compile("(\\d{4}-\\d{2})$").matcher(incident.id());
+            if (matcher.find()) {
+                return matcher.group(1);
+            }
+        }
+        return explicit;
     }
 
     private static String firstEvidenceMetric(Incident incident) {

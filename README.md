@@ -48,7 +48,7 @@ flowchart TB
     end
 
     POL2["<b>10. POLICY — ActionGuard</b><br/>notify ✓ · vendor_escalation ✓<br/>review_allocation ✓ · auto_reallocate ✗"]:::pol
-    DEL["<b>11. routing + delivery/</b><br/>transport_manager · facilities_head<br/>line_manager · executive"]:::out
+    DEL["<b>11. delivery/</b><br/>OwnerRouter · OutboxStore<br/>notify SENT · vendor letter BLOCKED"]:::out
 
     MEM[("<b>incident/</b> — MEMORY<br/>open incidents · suppressions<br/>follow-ups")]:::mem
     AUD[("<b>audit/</b> — AUDIT<br/>what · why · who was told<br/>tokens · cost · run id")]:::mem
@@ -112,6 +112,9 @@ curl localhost:8080/api/incidents                                # open incident
 curl localhost:8080/api/incidents/INC-2026-06-001                # one incident, full payload
 curl 'localhost:8080/api/attribution?metric=ota&period=2026-06'  # the waterfall, all dimensions
 curl 'localhost:8080/api/reports/brief?persona=facilities_head&format=markdown'
+curl localhost:8080/api/outbox
+curl -X POST localhost:8080/api/incidents/INC-ID/recheck -H 'Content-Type: application/json' \
+     -d '{"period":"2026-07"}'
 curl -X POST localhost:8080/api/chat -H 'Content-Type: application/json' \
      -d '{"question":"why did on-time arrival drop in June?"}'
 ```
@@ -128,21 +131,24 @@ mvn test
 ### Docker
 
 The CSVs stay on the host (`data/raw/`, gitignored) and are mounted read-only into the API
-container. LLM keys are optional; copy `.env.example` to `.env` if you want a provider.
+container. Incident memory and the communications outbox are mounted read-write at
+`data/state/` (`incidents.json`, `outbox.json`, `audit.jsonl`) so a `compose down` does not
+erase the act loop. LLM keys are optional; copy `.env.example` to `.env` if you want a provider.
 
 ```bash
 # data/raw/ must already contain the 7 extracts
 docker compose up --build
 ```
 
-Then open **http://localhost:4200**. The console is proxied to the API on **http://localhost:8080**,
-so the curl examples above work unchanged. Give the API a couple of minutes on first boot — ingest
-loads millions of rows before `/api/health` reports `datasetReady: true`.
+Then open **http://localhost:4200**. Nginx in the `web` container proxies `/api/` to the API,
+including `/api/outbox` and `/api/incidents/.../recheck`. Direct curls on **http://localhost:8080**
+still work. Give the API a couple of minutes on first boot — ingest loads millions of rows before
+`/api/health` reports `datasetReady: true`.
 
 ```bash
 docker compose up --build -d          # detached
 docker compose logs -f api           # ingest progress
-docker compose down
+docker compose down                   # keeps ./data/state on the host
 ```
 
 ### Running without a key
@@ -329,7 +335,7 @@ five business units are running side by side in the demo data today.
 | # | Requirement | Satisfied by | Evidence |
 |---|---|---|---|
 | **M1** | Working, demo-able prototype on the provided dataset | `SenseReasonActPipeline` + 7 REST endpoints + Angular console | `POST /api/runs` runs end to end on all 3.4M rows in ~4 min |
-| **M2** | Agentic behaviour — senses, reasons, **acts**; not a passive dashboard | `AnomalyScanner` (sense) → `ReasoningAgent` + `AttributionService` (reason) → `ActionGuard` + `delivery/` + `FollowUpScheduler` (act) | The system opens an incident, routes it to an owner, schedules a 3-day re-check, and **escalates unprompted at 7 days** if the metric has not recovered |
+| **M2** | Agentic behaviour — senses, reasons, **acts**; not a passive dashboard | `AnomalyScanner` (sense) → `ReasoningAgent` + `AttributionService` (reason) → `ActionGuard` + `delivery/` outbox + `FollowUpScheduler` (act) | Opens an incident, **sends a notify to the routed owner**, refuses vendor escalation when vendor power is below the bar, schedules a re-check, and **re-measures a later period** unprompted |
 | **M3** | Serves at least one named persona | 4 personas: `transport_manager`, `facilities_head`, `line_manager`, `executive` | `GET /api/reports/brief?persona=…` — persona is a parameter, not a fork in the code |
 | **M4** | Contextualises metrics against ≥1 reference point | `BenchmarkService` attaches **all four**: `Trend`, `Sla`, `Peer`, `Industry` | Every `MetricObservation` carries a populated `References` record — never a bare number |
 | **G1** | Combines ≥2 solution forms | **Five** of the five listed: conversational agent (`/api/chat`), proactive triggers (`CadenceScheduler`, `FollowUpScheduler`), automated narrative (`/api/reports/brief`), anomaly detection (`AnomalyScanner`), decision-support dashboard (Angular) | — |
@@ -365,10 +371,11 @@ five business units are running side by side in the demo data today.
 │   ├── agent/        Triage · Reasoning · Narrative + guard/NumericValidator
 │   ├── llm/          ClaudeClient · GeminiClient · SarvamClient · NimClient · ModelClientRouter
 │   ├── pipeline/     SenseReasonActPipeline · CadenceScheduler · spi/ · fallback/
+│   ├── delivery/     OwnerRouter · OutboxStore · ConsoleNotificationSink   ← act
 │   ├── audit/        AuditLog — what, why, who was told, what it cost
-│   └── controller/   7 REST endpoints
+│   └── controller/   runs · incidents · outbox · followups · chat · briefs
 ├── src/main/resources/metrics/   8 metric definitions — YAML, not code
-├── frontend/         Angular 19 standalone — dashboard · incident · chat · brief
+├── frontend/         Angular 19 standalone — dashboard · incident · chat · brief · outbox
 ├── docs/             ARCHITECTURE · SAMPLE_IO · DECK_OUTLINE · DEMO_SCRIPT · findings/
 ├── tools/analysis/   the Python scripts that produced every number in docs/findings/
 └── data/raw/         the 7 CSVs (gitignored)

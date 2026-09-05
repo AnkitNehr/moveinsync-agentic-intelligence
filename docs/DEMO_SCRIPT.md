@@ -116,13 +116,25 @@ point at rows as you speak.
 
 > **SAY:** "And look — it *refuses* to raise a vendor escalation. Not because escalation is
 > disabled, but because **the evidence doesn't support it, and it gives you the number**: vendor
-> explanatory power zero point zero seven. The model can have an opinion. It never gets authority."
+> explanatory power zero point zero seven. Click it anyway — four-oh-three, same reason on screen.
+> The model can have an opinion. It never gets authority."
 
-⏱ **Checkpoint 2:15.** If you're at 2:30, skip the `recommendedActions` beat and go.
+**Click `notify`.** Then **Outbox** tab.
+
+> **SAY:** "Notify already went. Routing desk, not vendor ops — because LOGIN and MANUAL won, not
+> vendor. This is the artefact a manager forwards. The dashboard was the sensing. This is the act."
+
+**Back on the incident. Re-check period `2026-07`. Click Run follow-up now.**
+
+> **SAY:** "And it promised to look again. I am not waiting three days. July is on disk. One click
+> and the loop either closes quietly or escalates — nobody prompted it except the calendar, and
+> today the calendar is this button."
+
+⏱ **Checkpoint 2:45.** If you're at 2:55, skip the follow-up click and go. Never skip the locked vendor letter.
 
 ---
 
-## 2:15 – 3:30 · Finding 2 — the alarm that stopped ringing
+## 2:45 – 3:40 · Finding 2 — the alarm that stopped ringing
 
 **Switch to Window 2** (already loaded — do not navigate, do not search).
 
@@ -150,11 +162,11 @@ Point at the headline: **7,670 → 46 → 20, −99.7%**.
 > **An agent that reported 'safety improved' would have been fluent, confident, and wrong.** That's
 > the failure mode everyone is afraid of with this technology. It's the one we spent the effort on."
 
-⏱ **Checkpoint 3:30.** This is the emotional peak. Pause for one beat before moving.
+⏱ **Checkpoint 3:40.** This is the emotional peak. Pause for one beat before moving.
 
 ---
 
-## 3:30 – 4:20 · Finding 3 — cost-per-km is broken
+## 3:40 – 4:20 · Finding 3 — cost-per-km is broken
 
 **Window 1 → Chat tab.** Type the question live:
 
@@ -286,17 +298,17 @@ curl -s localhost:8080/api/health | jq '{status, datasetReady, rows, llmAvailabl
 endpoint in this run sheet, with the real numbers. Walk it top to bottom in the same order as this
 script. The findings are the demo; the UI is the packaging.
 
-## Fallback D — you are over time at 3:30
+## Fallback D — you are over time at 3:40
 
 Cut in this order, and only in this order:
 
-1. **§3:30–4:20 (cost-per-km)** — hardest to land quickly, easiest to lose. Replace with one line:
+1. **§3:40–4:20 (cost-per-km)** — hardest to land quickly, easiest to lose. Replace with one line:
    *"There's a third finding — cost-per-km is undefined for forty-two percent of the spend and the
    system says so instead of computing it. It's in the README."*
-2. **The `recommendedActions` beat in §1:00–2:15.**
+2. **The follow-up click in §1:00–2:45.** Keep the locked vendor letter.
 3. **§0:00–0:30 (the frame)** — open cold on the attribution waterfall instead.
 
-**Never cut §2:15–3:30.** The alert that went silent is the finding no dashboard can produce, and
+**Never cut §2:45–3:40.** The alert that went silent is the finding no dashboard can produce, and
 it is the only thing in this demo that a competing submission cannot also claim.
 
 ---

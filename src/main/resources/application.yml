@@ -23,6 +23,10 @@ app:
     # (e.g. "Ride_data _trip-may_2026.csv") so globbing is done with Ride_data*.csv.
     raw-path: ./data/raw
 
+  state:
+    # Incident memory, outbox, and audit.jsonl. Docker mounts this at /data/state.
+    dir: ./data/state
+
   sla:
     # On-time arrival target: 95% of campus trips must land within the grace window.
     ota: 0.95
@@ -54,6 +58,11 @@ app:
     # Mean billed cost per trip is 1331 (May) / 1340 (Jun) / 1356 (Jul);
     # median 1275, p90 1860. 1400 is a ceiling with headroom above the trend.
     cost-per-trip: 1400.0
+
+  policy:
+    # Vendor letters require both persistence and evidence. Below this explanatory
+    # power, routing desk owns the conversation even after two breaching periods.
+    vendor-escalation-min-power: 0.25
 
   industry:
     # External benchmarks used for peer framing in metric observations.
@@ -120,12 +129,11 @@ app:
 
     nim:
       # Hosted NVIDIA NIM at https://integrate.api.nvidia.com/v1/chat/completions.
-      # Catalog ids (e.g. google/gemma-4-31b-it) are swapped here, not in NimClient.
-      # Thinking is off: this app wants JSON/markdown, not chain-of-thought.
+      # Probed locally: nvidia/nemotron-3.5-lightning-30b-a3b (~21s, thinking off).
       enable-thinking: false
-      cheap-model: google/gemma-4-31b-it
-      mid-model: google/gemma-4-31b-it
-      strong-model: google/gemma-4-31b-it
+      cheap-model: nvidia/nemotron-3.5-lightning-30b-a3b
+      mid-model: nvidia/nemotron-3.5-lightning-30b-a3b
+      strong-model: nvidia/nemotron-3.5-lightning-30b-a3b
 
   cors:
     allowed-origins:

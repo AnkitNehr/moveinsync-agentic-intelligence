@@ -126,8 +126,8 @@ class FollowUpSchedulerTest {
     }
 
     @Test
-    @DisplayName("escalation unlocks vendor_escalation, which was denied on the original incident")
-    void escalationUnlocksVendorEscalation() {
+    @DisplayName("escalation does not unlock vendor_escalation without vendor attribution evidence")
+    void escalationDoesNotUnlockVendorWithoutEvidence() {
         Incident original = openIncident(3, 1);
         ActionGuard guard = new ActionGuard();
 
@@ -136,8 +136,10 @@ class FollowUpSchedulerTest {
 
         Incident escalation = scheduler.runDueFollowUps(DUE).get(0);
 
-        assertThat(permitted(escalation.recommendedActions(), ActionGuard.VENDOR_ESCALATION)).isTrue();
+        assertThat(permitted(escalation.recommendedActions(), ActionGuard.VENDOR_ESCALATION)).isFalse();
         assertThat(permitted(escalation.recommendedActions(), ActionGuard.NOTIFY)).isTrue();
+        assertThat(action(escalation.recommendedActions(), ActionGuard.VENDOR_ESCALATION).reason())
+                .contains("vendor");
         assertThat(permitted(escalation.recommendedActions(), ActionGuard.REVIEW_ALLOCATION)).isFalse();
         assertThat(permitted(escalation.recommendedActions(), ActionGuard.AUTO_REALLOCATE)).isFalse();
     }
@@ -286,11 +288,34 @@ class FollowUpSchedulerTest {
         assertThat(store.allFollowUps().get(0).status()).isEqualTo(FollowUp.PENDING);
     }
 
+    @Test
+    @DisplayName("a period override is the month actually re-measured")
+    void periodOverrideIsPassedToRecheck() {
+        openIncident(3, 1);
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        scheduler = new FollowUpScheduler(
+                store, slaPolicy, new ActionGuard(), new AuditLog(stateDir.toString()),
+                provider((MetricRecheckPort) (m, d, e, p) -> {
+                    seen.set(p);
+                    return observationOf(0.9700);
+                }));
+
+        scheduler.runDueFollowUps(DUE, "2026-07");
+
+        assertThat(seen.get()).isEqualTo("2026-07");
+        assertThat(store.byId("inc-001")).get()
+                .extracting(Incident::status)
+                .isEqualTo(IncidentStore.STATUS_RESOLVED);
+    }
+
     private static boolean permitted(List<Action> actions, String type) {
+        return action(actions, type).permitted();
+    }
+
+    private static Action action(List<Action> actions, String type) {
         return actions.stream()
-                .filter(action -> type.equals(action.type()))
+                .filter(a -> type.equals(a.type()))
                 .findFirst()
-                .map(Action::permitted)
                 .orElseThrow(() -> new AssertionError("action not emitted: " + type));
     }
 }
