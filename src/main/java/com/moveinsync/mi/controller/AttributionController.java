@@ -226,10 +226,11 @@ public class AttributionController {
     }
 
     private static String validate(String period) {
-        if (MetricQueryService.parsePeriod(period) == null) {
+        String canonical = MetricQueryService.canonicalPeriod(period);
+        if (canonical == null) {
             throw new IllegalArgumentException(
                     "Malformed period '" + period + "'; expected a yyyy-MM label such as 2026-06.");
         }
-        return period;
+        return canonical;
     }
 }

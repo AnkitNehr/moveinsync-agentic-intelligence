@@ -1,0 +1,221 @@
+{
+  "incidents" : [ {
+    "id" : "inc-ota-down-2026-06",
+    "title" : "On-Time Arrival fell -4.07 pts on office = Clearwater Campus",
+    "whyNow" : "Now at 89.22% against a target of 95.00%. Moved -4.07 pts period over period across 40,574 trips. The same movement appears on 19 correlated slices, reported here once rather than as separate alerts.",
+    "priority" : 1,
+    "severity" : "CRITICAL",
+    "findingIds" : [ "ota:office:clearwater_campus:2026_06", "ota:product_type:bus:2026_06", "ota:route_source:manual:2026_06", "ota:office:denver_office:2026_06", "ota:business_unit:pinnacle_slc:2026_06", "ota:business_unit:vanta_sea:2026_06" ],
+    "explanation" : "## On-Time Arrival fell -4.07 pts on office = Clearwater Campus\n\n_Written for the transport manager: the operating lever, the vendor or route that carries the movement, and what policy permits today._\n\n**Why now.** Now at 89.22% against a target of 95.00%. Moved -4.07 pts period over period across 40,574 trips. The same movement appears on 19 correlated slices, reported here once rather than as separate alerts.\n\n**What moved.**\n\n- `ota` on **office = Clearwater Campus**: 93.29% in 2026-05 to 89.22% in 2026-06 (-4.07 pts, 40,574 trips)\n- `ota` on **product_type = BUS**: 91.53% in 2026-05 to 85.28% in 2026-06 (-6.25 pts, 34,168 trips)\n- `ota` on **route_source = MANUAL**: 91.55% in 2026-05 to 85.32% in 2026-06 (-6.22 pts, 34,344 trips)\n- `ota` on **office = Denver Office**: 94.63% in 2026-05 to 90.48% in 2026-06 (-4.15 pts, 60,636 trips)\n- `ota` on **business_unit = pinnacle-Slc**: 93.41% in 2026-05 to 90.29% in 2026-06 (-3.12 pts, 88,035 trips)\n- `ota` on **business_unit = vanta-Sea**: 94.61% in 2026-05 to 90.46% in 2026-06 (-4.15 pts, 60,765 trips)\n\n**What the decomposition shows.**\n\nOn-Time Arrival on office=Clearwater Campus fell from 93.29% in 2026-05 to 89.22% in 2026-06 (-4.07 pts) across 40,574 trips. This breaches the configured target of 95.00%. Against its cohort on the same dimension it ranks 12 of 12, with a cohort median of 96.29%. The published benchmark is 93.00% (config:app.industry.ota). Measured against this series' own history the move is -1.2 robust z. The same movement is visible on product_type=BUS at -6.25 pts, route_source=MANUAL at -6.22 pts, office=Denver Office at -4.15 pts, business_unit=pinnacle-Slc at -3.12 pts, business_unit=vanta-Sea at -4.15 pts. These are correlated views of largely the same trips, not independent problems. Scanning all 9 decomposable dimensions, trip_direction explains the movement best (explanatory power 0.83, concentration 1.00 across 2 entities). The leading contributors are LOGIN (-2.43 pts total: -2.41 pts rate, -0.02 pts mix; share 46.0% to 46.6%); LOGOUT (-0.43 pts total: -0.41 pts rate, -0.02 pts mix; share 54.0% to 53.4%). Mix effects account for only 1% of the gross movement, so this is a rate change, not a redistribution of volume: the same entities carried roughly the same share and performed worse. An explanation blaming a shift of volume between entities is not supported by these numbers. Also decomposed and ranked lower: product_type (0.54), route_source (0.54), business_unit (0.48), trip_nodal (0.44). Every dimension reconciles to the same aggregate delta, so being arithmetically correct is not the test — these were rejected because they restate the total rather than concentrating it. The decomposition reconciles to the aggregate movement within tolerance. Confidence HIGH on 100.0% coverage. Caveats: on_time classifies a trip with an unparseable delay_minutes as late. Coverage is reported alongside every value so this assumption is visible rather than silent. is_driver_nc / is_cab_nc drift between boolean (Jun, Jul) and string-with-nulls (May) across the monthly ride files; the trips view reads all columns as VARCHAR and TRY_CASTs, so no month is silently dropped. Robust z computed cross-sectionally against 12 sibling office deltas: only 2 usable periods of history exist, which is too few for a temporal MAD.\n\n**Evidence.** Each claim is bound to the metric and entity it was derived from, so it can be re-derived rather than trusted.\n\n- ota on office=Clearwater Campus measured 0.8922 in 2026-06 against 0.9329 in 2026-05 across 40,574 trips.  \n  `metric=ota` `entity=Clearwater Campus`\n- On-Time Arrival on office=Clearwater Campus fell from 93.29% in 2026-05 to 89.22% in 2026-06 (-4.07 pts) across 40,574 trips.  \n  `metric=ota` `entity=Clearwater Campus`\n- This breaches the configured target of 95.00%.  \n  `metric=ota` `entity=Clearwater Campus`\n- Against its cohort on the same dimension it ranks 12 of 12, with a cohort median of 96.29%.  \n  `metric=ota` `entity=Clearwater Campus`\n- The published benchmark is 93.00% (config:app.industry.ota).  \n  `metric=ota` `entity=Clearwater Campus`\n- Measured against this series' own history the move is -1.2 robust z.  \n  `metric=ota` `entity=Clearwater Campus`\n- On-Time Arrival on product_type=BUS moved -6.25 pts.  \n  `metric=ota` `entity=BUS`\n- On-Time Arrival on route_source=MANUAL moved -6.22 pts.  \n  `metric=ota` `entity=MANUAL`\n- _8 further evidence bindings retained in the audit trail._\n\n**Recommended actions.** Refusals are listed alongside approvals on purpose: a blocked action that silently disappeared would be indistinguishable from one nobody considered.\n\n- **PERMITTED** `notify` → Clearwater Campus  \n  Notification is always permitted: it informs the owning team without altering allocation, contracts or cost exposure.\n- **PERMITTED** `vendor_escalation` → Clearwater Campus  \n  Breach sustained for 2 consecutive periods, which meets the 2-period threshold for formal vendor escalation.\n- _blocked_ `review_allocation` → Clearwater Campus  \n  Allocation review shifts volume between vendors and changes cost and contractual exposure; it is never auto-permitted and requires explicit human approval.\n- _blocked_ `auto_reallocate` → Clearwater Campus  \n  Autonomous reallocation is never permitted by policy. The platform recommends; a human decides and executes.\n\n**Policy.** Rule `SLA-OTA-001` · breached · breach depth 2 period(s) · band CRITICAL · escalation authorised.\n\n**Data quality.** Confidence HIGH on 100.0% coverage.\n- on_time classifies a trip with an unparseable delay_minutes as late. Coverage is reported alongside every value so this assumption is visible rather than silent.\n- is_driver_nc / is_cab_nc drift between boolean (Jun, Jul) and string-with-nulls (May) across the monthly ride files; the trips view reads all columns as VARCHAR and TRY_CASTs, so no month is silently dropped.\n- Robust z computed cross-sectionally against 12 sibling office deltas: only 2 usable periods of history exist, which is too few for a temporal MAD.",
+    "evidence" : [ {
+      "claim" : "ota on office=Clearwater Campus measured 0.8922 in 2026-06 against 0.9329 in 2026-05 across 40,574 trips.",
+      "metricId" : "ota",
+      "entity" : "Clearwater Campus"
+    }, {
+      "claim" : "On-Time Arrival on office=Clearwater Campus fell from 93.29% in 2026-05 to 89.22% in 2026-06 (-4.07 pts) across 40,574 trips.",
+      "metricId" : "ota",
+      "entity" : "Clearwater Campus"
+    }, {
+      "claim" : "This breaches the configured target of 95.00%.",
+      "metricId" : "ota",
+      "entity" : "Clearwater Campus"
+    }, {
+      "claim" : "Against its cohort on the same dimension it ranks 12 of 12, with a cohort median of 96.29%.",
+      "metricId" : "ota",
+      "entity" : "Clearwater Campus"
+    }, {
+      "claim" : "The published benchmark is 93.00% (config:app.industry.ota).",
+      "metricId" : "ota",
+      "entity" : "Clearwater Campus"
+    }, {
+      "claim" : "Measured against this series' own history the move is -1.2 robust z.",
+      "metricId" : "ota",
+      "entity" : "Clearwater Campus"
+    }, {
+      "claim" : "On-Time Arrival on product_type=BUS moved -6.25 pts.",
+      "metricId" : "ota",
+      "entity" : "BUS"
+    }, {
+      "claim" : "On-Time Arrival on route_source=MANUAL moved -6.22 pts.",
+      "metricId" : "ota",
+      "entity" : "MANUAL"
+    }, {
+      "claim" : "On-Time Arrival on office=Denver Office moved -4.15 pts.",
+      "metricId" : "ota",
+      "entity" : "Denver Office"
+    }, {
+      "claim" : "On-Time Arrival on business_unit=pinnacle-Slc moved -3.12 pts.",
+      "metricId" : "ota",
+      "entity" : "pinnacle-Slc"
+    }, {
+      "claim" : "On-Time Arrival on business_unit=vanta-Sea moved -4.15 pts.",
+      "metricId" : "ota",
+      "entity" : "vanta-Sea"
+    }, {
+      "claim" : "Scanning all 9 decomposable dimensions, trip_direction explains the movement best (explanatory power 0.83, concentration 1.00 across 2 entities).",
+      "metricId" : "ota",
+      "entity" : "trip_direction"
+    }, {
+      "claim" : "LOGIN contributed -2.43 pts to the On-Time Arrival movement.",
+      "metricId" : "ota",
+      "entity" : "LOGIN"
+    }, {
+      "claim" : "LOGOUT contributed -0.43 pts to the On-Time Arrival movement.",
+      "metricId" : "ota",
+      "entity" : "LOGOUT"
+    }, {
+      "claim" : "Mix effects account for only 1% of the gross movement, so this is a rate change, not a redistribution of volume: the same entities carried roughly the same share and performed worse. An explanation blaming a shift of volume between entities is not supported by these numbers.",
+      "metricId" : "ota",
+      "entity" : "trip_direction"
+    }, {
+      "claim" : "Also decomposed and ranked lower: product_type (0.54), route_source (0.54), business_unit (0.48), trip_nodal (0.44). Every dimension reconciles to the same aggregate delta, so being arithmetically correct is not the test — these were rejected because they restate the total rather than concentrating it.",
+      "metricId" : "ota",
+      "entity" : "ALL"
+    } ],
+    "recommendedActions" : [ {
+      "type" : "notify",
+      "target" : "Clearwater Campus",
+      "permitted" : true,
+      "reason" : "Notification is always permitted: it informs the owning team without altering allocation, contracts or cost exposure."
+    }, {
+      "type" : "vendor_escalation",
+      "target" : "Clearwater Campus",
+      "permitted" : true,
+      "reason" : "Breach sustained for 2 consecutive periods, which meets the 2-period threshold for formal vendor escalation."
+    }, {
+      "type" : "review_allocation",
+      "target" : "Clearwater Campus",
+      "permitted" : false,
+      "reason" : "Allocation review shifts volume between vendors and changes cost and contractual exposure; it is never auto-permitted and requires explicit human approval."
+    }, {
+      "type" : "auto_reallocate",
+      "target" : "Clearwater Campus",
+      "permitted" : false,
+      "reason" : "Autonomous reallocation is never permitted by policy. The platform recommends; a human decides and executes."
+    } ],
+    "policy" : {
+      "ruleId" : "SLA-OTA-001",
+      "breached" : true,
+      "consecutivePeriods" : 2,
+      "escalationPermitted" : true,
+      "severityBand" : "CRITICAL"
+    },
+    "quality" : {
+      "coverage" : 1.0,
+      "confidence" : "HIGH",
+      "caveats" : [ "on_time classifies a trip with an unparseable delay_minutes as late. Coverage is reported alongside every value so this assumption is visible rather than silent.", "is_driver_nc / is_cab_nc drift between boolean (Jun, Jul) and string-with-nulls (May) across the monthly ride files; the trips view reads all columns as VARCHAR and TRY_CASTs, so no month is silently dropped.", "Robust z computed cross-sectionally against 12 sibling office deltas: only 2 usable periods of history exist, which is too few for a temporal MAD." ]
+    },
+    "detectedAt" : "2026-09-05T02:42:19.968440Z",
+    "followUpAt" : "2026-09-12T02:42:19.968440Z",
+    "status" : "OPEN"
+  }, {
+    "id" : "inc-cost-per-km-down-2026-06",
+    "title" : "Cost per Kilometre (distance-based contracts) fell -31.53 on contract = DV_Package",
+    "whyNow" : "Now at 91.63 against a target of 85.00. The -31.53 move is 45.2 robust z against this series' own history, so it is a break from the pattern rather than normal variation.",
+    "priority" : 2,
+    "severity" : "CRITICAL",
+    "findingIds" : [ "cost_per_km:contract:dv_package:2026_06" ],
+    "explanation" : "## Cost per Kilometre (distance-based contracts) fell -31.53 on contract = DV_Package\n\n_Written for the transport manager: the operating lever, the vendor or route that carries the movement, and what policy permits today._\n\n**Why now.** Now at 91.63 against a target of 85.00. The -31.53 move is 45.2 robust z against this series' own history, so it is a break from the pattern rather than normal variation.\n\n**What moved.**\n\n- `cost_per_km` on **contract = DV_Package**: 123.16 in 2026-05 to 91.63 in 2026-06 (-31.53, 27,413 trips)\n\n**What the decomposition shows.**\n\nCost per Kilometre (distance-based contracts) on contract=DV_Package fell from 123.16 in 2026-05 to 91.63 in 2026-06 (-31.53) across 27,413 trips. This breaches the configured target of 85.00. Against its cohort on the same dimension it ranks 12 of 15, with a cohort median of 69.70. Measured against this series' own history the move is -45.2 robust z. Scanning all 5 decomposable dimensions, contract explains the movement best (explanatory power 0.97, concentration 0.97 across 15 entities). The leading contributors are DV_Package (-7.29 total: -6.90 rate, -0.39 mix; share 23.0% to 21.9%); EV_Package (-0.38 total: -0.45 rate, +0.06 mix; share 0.7% to 0.8%); 6Seater (+0.09 total: +0.05 rate, +0.05 mix; share 4.8% to 5.1%). Mix effects account for only 9% of the gross movement, so this is a rate change, not a redistribution of volume: the same entities carried roughly the same share and performed worse. An explanation blaming a shift of volume between entities is not supported by these numbers. Also decomposed and ranked lower: slab_name (0.93), business_unit (0.77), vendor (0.53), office (0.38). Every dimension reconciles to the same aggregate delta, so being arithmetically correct is not the test — these were rejected because they restate the total rather than concentrating it. The decomposition leaves +1.19 unaccounted for against the aggregate movement, which means entities were held back by the volume gate or carried a null dimension value. Treat the named contributors as the bulk of the story, not all of it. Confidence HIGH on 100.0% coverage. Caveats: Verified on the DISTANCE_BASED segment: 77.29 (May), 80.24 (June), 78.49 (July) at full coverage, against a fixed-rate segment whose naive figure is 4,947. The regime split is 368,849 distance rows to 252,093 fixed-rate rows. The SLA target was recalibrated from 25.0 to 85.0 after the first live run. At 25.0 every business unit sat in permanent CRITICAL breach and a cost *decrease* of -11.29 was raised as an incident, which is the classic symptom of a guessed constant. 85.0 is derived from the data: blended distance-contract cost per km is 75.37 (May), 80.05 (June), 78.37 (July), median per-line 88.5. Query: tools/analysis/sla_baseline.py. 189 billing lines carry negative trip_cost, the largest being -2,233,332.99. These are credit notes and adjustments, not trips. They are excluded from this unit-cost metric via a FILTER clause but retained in total spend. Left in, they pulled vanta-Slc's cost per km negative (-21.13), which no dashboard would flag as impossible. This quirk is absent from the supplied data dictionary. Only valid for distance-based contracts. Fixed-rate contracts (4S-HYD and 6S-HYD at 100% zero-km, 4S-EV-Z at 99.8%, the *-ORRNEW family at 99.7%, and the Short/Medium/Long slabs at ~98%) are excluded by the billing_regime predicate, not by a zero-km filter, so the exclusion is a contract fact rather than a data artefact. A small number of rows on 6S-PREMIUMNEW carry negative distance, which drives that contract's naive cost per km negative. Negative distance is retained and flagged rather than dropped; it lowers coverage for the affected slice. The 25.0 target in app.sla is a distance-contract target. Comparing a fixed-rate segment against it would be meaningless, which is the second reason for the regime guard. Robust z computed cross-sectionally against 15 sibling contract deltas: only 2 usable periods of history exist, which is too few for a temporal MAD.\n\n**Evidence.** Each claim is bound to the metric and entity it was derived from, so it can be re-derived rather than trusted.\n\n- cost_per_km on contract=DV_Package measured 91.6251 in 2026-06 against 123.1589 in 2026-05 across 27,413 trips.  \n  `metric=cost_per_km` `entity=DV_Package`\n- Cost per Kilometre (distance-based contracts) on contract=DV_Package fell from 123.16 in 2026-05 to 91.63 in 2026-06 (-31.53) across 27,413 trips.  \n  `metric=cost_per_km` `entity=DV_Package`\n- This breaches the configured target of 85.00.  \n  `metric=cost_per_km` `entity=DV_Package`\n- Against its cohort on the same dimension it ranks 12 of 15, with a cohort median of 69.70.  \n  `metric=cost_per_km` `entity=DV_Package`\n- Measured against this series' own history the move is -45.2 robust z.  \n  `metric=cost_per_km` `entity=DV_Package`\n- Scanning all 5 decomposable dimensions, contract explains the movement best (explanatory power 0.97, concentration 0.97 across 15 entities).  \n  `metric=cost_per_km` `entity=contract`\n- DV_Package contributed -7.29 to the Cost per Kilometre (distance-based contracts) movement.  \n  `metric=cost_per_km` `entity=DV_Package`\n- EV_Package contributed -0.38 to the Cost per Kilometre (distance-based contracts) movement.  \n  `metric=cost_per_km` `entity=EV_Package`\n- _3 further evidence bindings retained in the audit trail._\n\n**Recommended actions.** Refusals are listed alongside approvals on purpose: a blocked action that silently disappeared would be indistinguishable from one nobody considered.\n\n- **PERMITTED** `notify` → DV_Package  \n  Notification is always permitted: it informs the owning team without altering allocation, contracts or cost exposure.\n- **PERMITTED** `vendor_escalation` → DV_Package  \n  Breach sustained for 2 consecutive periods, which meets the 2-period threshold for formal vendor escalation.\n- _blocked_ `review_allocation` → DV_Package  \n  Allocation review shifts volume between vendors and changes cost and contractual exposure; it is never auto-permitted and requires explicit human approval.\n- _blocked_ `auto_reallocate` → DV_Package  \n  Autonomous reallocation is never permitted by policy. The platform recommends; a human decides and executes.\n\n**Policy.** Rule `SLA-CPK-001` · breached · breach depth 2 period(s) · band CRITICAL · escalation authorised.\n\n**Data quality.** Confidence HIGH on 100.0% coverage.\n- Verified on the DISTANCE_BASED segment: 77.29 (May), 80.24 (June), 78.49 (July) at full coverage, against a fixed-rate segment whose naive figure is 4,947. The regime split is 368,849 distance rows to 252,093 fixed-rate rows.\n- The SLA target was recalibrated from 25.0 to 85.0 after the first live run. At 25.0 every business unit sat in permanent CRITICAL breach and a cost *decrease* of -11.29 was raised as an incident, which is the classic symptom of a guessed constant. 85.0 is derived from the data: blended distance-contract cost per km is 75.37 (May), 80.05 (June), 78.37 (July), median per-line 88.5. Query: tools/analysis/sla_baseline.py.\n- 189 billing lines carry negative trip_cost, the largest being -2,233,332.99. These are credit notes and adjustments, not trips. They are excluded from this unit-cost metric via a FILTER clause but retained in total spend. Left in, they pulled vanta-Slc's cost per km negative (-21.13), which no dashboard would flag as impossible. This quirk is absent from the supplied data dictionary.\n- Only valid for distance-based contracts. Fixed-rate contracts (4S-HYD and 6S-HYD at 100% zero-km, 4S-EV-Z at 99.8%, the *-ORRNEW family at 99.7%, and the Short/Medium/Long slabs at ~98%) are excluded by the billing_regime predicate, not by a zero-km filter, so the exclusion is a contract fact rather than a data artefact.\n- A small number of rows on 6S-PREMIUMNEW carry negative distance, which drives that contract's naive cost per km negative. Negative distance is retained and flagged rather than dropped; it lowers coverage for the affected slice.\n- The 25.0 target in app.sla is a distance-contract target. Comparing a fixed-rate segment against it would be meaningless, which is the second reason for the regime guard.\n- Robust z computed cross-sectionally against 15 sibling contract deltas: only 2 usable periods of history exist, which is too few for a temporal MAD.",
+    "evidence" : [ {
+      "claim" : "cost_per_km on contract=DV_Package measured 91.6251 in 2026-06 against 123.1589 in 2026-05 across 27,413 trips.",
+      "metricId" : "cost_per_km",
+      "entity" : "DV_Package"
+    }, {
+      "claim" : "Cost per Kilometre (distance-based contracts) on contract=DV_Package fell from 123.16 in 2026-05 to 91.63 in 2026-06 (-31.53) across 27,413 trips.",
+      "metricId" : "cost_per_km",
+      "entity" : "DV_Package"
+    }, {
+      "claim" : "This breaches the configured target of 85.00.",
+      "metricId" : "cost_per_km",
+      "entity" : "DV_Package"
+    }, {
+      "claim" : "Against its cohort on the same dimension it ranks 12 of 15, with a cohort median of 69.70.",
+      "metricId" : "cost_per_km",
+      "entity" : "DV_Package"
+    }, {
+      "claim" : "Measured against this series' own history the move is -45.2 robust z.",
+      "metricId" : "cost_per_km",
+      "entity" : "DV_Package"
+    }, {
+      "claim" : "Scanning all 5 decomposable dimensions, contract explains the movement best (explanatory power 0.97, concentration 0.97 across 15 entities).",
+      "metricId" : "cost_per_km",
+      "entity" : "contract"
+    }, {
+      "claim" : "DV_Package contributed -7.29 to the Cost per Kilometre (distance-based contracts) movement.",
+      "metricId" : "cost_per_km",
+      "entity" : "DV_Package"
+    }, {
+      "claim" : "EV_Package contributed -0.38 to the Cost per Kilometre (distance-based contracts) movement.",
+      "metricId" : "cost_per_km",
+      "entity" : "EV_Package"
+    }, {
+      "claim" : "6Seater contributed +0.09 to the Cost per Kilometre (distance-based contracts) movement.",
+      "metricId" : "cost_per_km",
+      "entity" : "6Seater"
+    }, {
+      "claim" : "Mix effects account for only 9% of the gross movement, so this is a rate change, not a redistribution of volume: the same entities carried roughly the same share and performed worse. An explanation blaming a shift of volume between entities is not supported by these numbers.",
+      "metricId" : "cost_per_km",
+      "entity" : "contract"
+    }, {
+      "claim" : "Also decomposed and ranked lower: slab_name (0.93), business_unit (0.77), vendor (0.53), office (0.38). Every dimension reconciles to the same aggregate delta, so being arithmetically correct is not the test — these were rejected because they restate the total rather than concentrating it.",
+      "metricId" : "cost_per_km",
+      "entity" : "ALL"
+    } ],
+    "recommendedActions" : [ {
+      "type" : "notify",
+      "target" : "DV_Package",
+      "permitted" : true,
+      "reason" : "Notification is always permitted: it informs the owning team without altering allocation, contracts or cost exposure."
+    }, {
+      "type" : "vendor_escalation",
+      "target" : "DV_Package",
+      "permitted" : true,
+      "reason" : "Breach sustained for 2 consecutive periods, which meets the 2-period threshold for formal vendor escalation."
+    }, {
+      "type" : "review_allocation",
+      "target" : "DV_Package",
+      "permitted" : false,
+      "reason" : "Allocation review shifts volume between vendors and changes cost and contractual exposure; it is never auto-permitted and requires explicit human approval."
+    }, {
+      "type" : "auto_reallocate",
+      "target" : "DV_Package",
+      "permitted" : false,
+      "reason" : "Autonomous reallocation is never permitted by policy. The platform recommends; a human decides and executes."
+    } ],
+    "policy" : {
+      "ruleId" : "SLA-CPK-001",
+      "breached" : true,
+      "consecutivePeriods" : 2,
+      "escalationPermitted" : true,
+      "severityBand" : "CRITICAL"
+    },
+    "quality" : {
+      "coverage" : 1.0,
+      "confidence" : "HIGH",
+      "caveats" : [ "Verified on the DISTANCE_BASED segment: 77.29 (May), 80.24 (June), 78.49 (July) at full coverage, against a fixed-rate segment whose naive figure is 4,947. The regime split is 368,849 distance rows to 252,093 fixed-rate rows.", "The SLA target was recalibrated from 25.0 to 85.0 after the first live run. At 25.0 every business unit sat in permanent CRITICAL breach and a cost *decrease* of -11.29 was raised as an incident, which is the classic symptom of a guessed constant. 85.0 is derived from the data: blended distance-contract cost per km is 75.37 (May), 80.05 (June), 78.37 (July), median per-line 88.5. Query: tools/analysis/sla_baseline.py.", "189 billing lines carry negative trip_cost, the largest being -2,233,332.99. These are credit notes and adjustments, not trips. They are excluded from this unit-cost metric via a FILTER clause but retained in total spend. Left in, they pulled vanta-Slc's cost per km negative (-21.13), which no dashboard would flag as impossible. This quirk is absent from the supplied data dictionary.", "Only valid for distance-based contracts. Fixed-rate contracts (4S-HYD and 6S-HYD at 100% zero-km, 4S-EV-Z at 99.8%, the *-ORRNEW family at 99.7%, and the Short/Medium/Long slabs at ~98%) are excluded by the billing_regime predicate, not by a zero-km filter, so the exclusion is a contract fact rather than a data artefact.", "A small number of rows on 6S-PREMIUMNEW carry negative distance, which drives that contract's naive cost per km negative. Negative distance is retained and flagged rather than dropped; it lowers coverage for the affected slice.", "The 25.0 target in app.sla is a distance-contract target. Comparing a fixed-rate segment against it would be meaningless, which is the second reason for the regime guard.", "Robust z computed cross-sectionally against 15 sibling contract deltas: only 2 usable periods of history exist, which is too few for a temporal MAD." ]
+    },
+    "detectedAt" : "2026-09-05T02:42:19.968440Z",
+    "followUpAt" : "2026-09-12T02:42:19.968440Z",
+    "status" : "OPEN"
+  } ],
+  "suppressions" : [ ],
+  "followUps" : [ {
+    "incidentId" : "inc-ota-down-2026-06",
+    "metricId" : "ota",
+    "dimension" : null,
+    "entity" : "Clearwater Campus",
+    "period" : null,
+    "dueAt" : "2026-09-12T02:42:19.968440Z",
+    "status" : "PENDING",
+    "note" : null
+  }, {
+    "incidentId" : "inc-cost-per-km-down-2026-06",
+    "metricId" : "cost_per_km",
+    "dimension" : null,
+    "entity" : "DV_Package",
+    "period" : null,
+    "dueAt" : "2026-09-12T02:42:19.968440Z",
+    "status" : "PENDING",
+    "note" : null
+  } ]
+}

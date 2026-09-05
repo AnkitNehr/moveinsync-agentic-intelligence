@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
@@ -103,6 +104,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> explicitStatus(ResponseStatusException e, HttpServletRequest request) {
         return ResponseEntity.status(e.getStatusCode())
                 .body(ApiError.of("error", e.getReason(), request));
+    }
+
+    /**
+     * An unmatched URL is a client mistake, not a server fault.
+     *
+     * <p>Without this, a typo'd path falls through to the catch-all below and is reported as
+     * {@code 500 internal_error} and logged with a stack trace, which makes a wrong URL look like an
+     * outage in exactly the place someone would go looking for one.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiError> noSuchRoute(NoResourceFoundException e, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiError.of("not_found", "No endpoint at " + e.getResourcePath() + ".", request));
     }
 
     /** The genuine last resort. Logged with a trace; the client gets the class and message only. */

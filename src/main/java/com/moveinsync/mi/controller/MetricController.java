@@ -178,12 +178,12 @@ public class MetricController {
 
     private String resolvePeriod(MetricDefinition definition, String period) {
         if (period != null && !period.isBlank()) {
-            String trimmed = period.trim();
-            if (MetricQueryService.parsePeriod(trimmed) == null) {
+            String canonical = MetricQueryService.canonicalPeriod(period);
+            if (canonical == null) {
                 throw new IllegalArgumentException(
                         "Malformed period '" + period + "'; expected a yyyy-MM label such as 2026-06.");
             }
-            return trimmed;
+            return canonical;
         }
         return metrics.latestPeriod(definition.id())
                 .orElseThrow(() -> new NotFoundException(

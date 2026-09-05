@@ -246,16 +246,26 @@ public class SenseReasonActPipeline {
 
     private RunSummary execute(String requestedPeriod, String requestedPrior) {
         Instant startedAt = Instant.now();
-        String period = (requestedPeriod == null || requestedPeriod.isBlank())
-                ? defaultPeriod()
-                : requestedPeriod.trim();
-        if (MetricQueryService.parsePeriod(period) == null) {
-            throw new IllegalArgumentException(
-                    "Malformed period '" + requestedPeriod + "'; expected a yyyy-MM label such as 2026-06.");
+        String period;
+        if (requestedPeriod == null || requestedPeriod.isBlank()) {
+            period = defaultPeriod();
+        } else {
+            period = MetricQueryService.canonicalPeriod(requestedPeriod);
+            if (period == null) {
+                throw new IllegalArgumentException("Malformed period '" + requestedPeriod
+                        + "'; expected a yyyy-MM label such as 2026-06.");
+            }
         }
-        String priorPeriod = (requestedPrior == null || requestedPrior.isBlank())
-                ? priorPeriodOf(period)
-                : requestedPrior.trim();
+        String priorPeriod;
+        if (requestedPrior == null || requestedPrior.isBlank()) {
+            priorPeriod = priorPeriodOf(period);
+        } else {
+            priorPeriod = MetricQueryService.canonicalPeriod(requestedPrior);
+            if (priorPeriod == null) {
+                throw new IllegalArgumentException("Malformed period '" + requestedPrior
+                        + "'; expected a yyyy-MM label such as 2026-06.");
+            }
+        }
 
         String runId = "run-" + startedAt.toString().replaceAll("[^0-9A-Za-z]", "") + "-" + period;
         usage.beginRun(runId);

@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -58,6 +59,9 @@ public class MetricQueryService implements MetricCatalogPort, MetricSeriesPort {
 
     /** Period label format. Everything in this system is monthly at present. */
     public static final DateTimeFormatter PERIOD_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM");
+
+    /** The dated form of a period label, accepted on input and truncated to its month. */
+    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
 
     /** Confidence band for a slice suppressed by the volume gate. Never carries a value. */
     public static final String CONFIDENCE_INSUFFICIENT_SAMPLE = "insufficient_sample";
@@ -374,7 +378,12 @@ public class MetricQueryService implements MetricCatalogPort, MetricSeriesPort {
     // ---- period helpers -------------------------------------------------------------------------
 
     /**
-     * Parses a {@code yyyy-MM} period label.
+     * Parses a period label.
+     *
+     * <p>Accepts both the canonical {@code yyyy-MM} label and a full ISO {@code yyyy-MM-dd} date,
+     * which is truncated to its month. The month grain is what the platform reasons in, but every
+     * period in the source extracts is a month boundary and the documented API examples spell that
+     * as {@code 2026-06-01}, so rejecting the dated form only ever surprises the caller.
      *
      * @return the month, or null when the label is absent or malformed. Returning null rather than
      *         throwing keeps a bad period label from taking down a whole scan; every caller here
@@ -384,12 +393,31 @@ public class MetricQueryService implements MetricCatalogPort, MetricSeriesPort {
         if (period == null || period.isBlank()) {
             return null;
         }
+        String trimmed = period.trim();
         try {
-            return YearMonth.parse(period.trim(), PERIOD_FORMAT);
+            return YearMonth.parse(trimmed, PERIOD_FORMAT);
+        } catch (DateTimeParseException ignored) {
+            // fall through to the dated form
+        }
+        try {
+            return YearMonth.from(LocalDate.parse(trimmed, DATE_FORMAT));
         } catch (DateTimeParseException e) {
-            log.warn("Malformed period label '{}' (expected yyyy-MM)", period);
+            log.warn("Malformed period label '{}' (expected yyyy-MM or yyyy-MM-dd)", period);
             return null;
         }
+    }
+
+    /**
+     * Normalises any accepted period label to the canonical {@code yyyy-MM} form.
+     *
+     * <p>Callers must use this rather than passing a caller-supplied string onward: period labels are
+     * compared against {@code strftime(..., '%Y-%m')} in SQL, so an un-normalised {@code 2026-06-01}
+     * would match no rows and report an empty month as a clean one.
+     *
+     * @return the canonical label, or null when the input is absent or malformed
+     */
+    public static String canonicalPeriod(String period) {
+        return formatPeriod(parsePeriod(period));
     }
 
     /** Formats a month as a period label. */

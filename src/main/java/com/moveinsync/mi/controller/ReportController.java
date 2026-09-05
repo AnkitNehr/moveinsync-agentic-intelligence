@@ -183,12 +183,12 @@ public class ReportController {
 
     private String resolvePeriod(String period) {
         if (period != null && !period.isBlank()) {
-            String trimmed = period.trim();
-            if (MetricQueryService.parsePeriod(trimmed) == null) {
+            String canonical = MetricQueryService.canonicalPeriod(period);
+            if (canonical == null) {
                 throw new IllegalArgumentException(
                         "Malformed period '" + period + "'; expected a yyyy-MM label such as 2026-06.");
             }
-            return trimmed;
+            return canonical;
         }
         for (MetricDefinition definition : catalog.all()) {
             var latest = metrics.latestPeriod(definition.id());

@@ -31,7 +31,17 @@ app:
     # Alerts must be acknowledged within 15 minutes of being raised.
     alert-ack-minutes: 15
     # Only meaningful for distance-based contracts; fixed-rate contracts report 0 km.
-    cost-per-km-distance-contracts: 25.0
+    #
+    # Derived from the data, NOT guessed. Blended cost per km on distance-based
+    # contracts runs 75.37 (May) / 80.05 (Jun) / 78.37 (Jul), median per-line 88.5.
+    # A target of 25.0 put every business unit permanently in CRITICAL breach and
+    # flagged a cost *decrease* as an incident. 85.0 sits just above the observed
+    # blended rate, so it is a genuine ceiling rather than a constant alarm.
+    # See tools/analysis/sla_baseline.py for the query behind this number.
+    cost-per-km-distance-contracts: 85.0
+    # Mean billed cost per trip is 1331 (May) / 1340 (Jun) / 1356 (Jul);
+    # median 1275, p90 1860. 1400 is a ceiling with headroom above the trend.
+    cost-per-trip: 1400.0
 
   industry:
     # External benchmarks used for peer framing in metric observations.
