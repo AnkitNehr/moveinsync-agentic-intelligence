@@ -129,11 +129,18 @@ interface WaterfallRow {
 
       <!-- ============ four reference frames ============ -->
       <section class="panel">
-        <h2>Reference frames</h2>
+        <h2>Reference frames &middot; fleet-wide</h2>
         <p class="hint">
-          The same value read four ways. A movement that is large against its own
-          history but normal against the peer cohort is a different problem from one
-          that is out of line on every frame.
+          One value read four ways. A movement that is large against its own history but
+          normal against the peer cohort is a different problem from one that is out of
+          line on every frame.
+        </p>
+        <p class="hint">
+          <strong>Scope:</strong> these frames read the fleet-wide series for this metric, not the
+          slice named in the headline above. That is deliberate — the question they answer is
+          "is the fleet as a whole out of line?", which is what tells you whether one slice is a
+          local problem or the visible edge of a general one. It does mean the movement here will
+          not equal the headline movement, and the two are not meant to reconcile.
         </p>
 
         @if (observation(); as o) {
@@ -142,8 +149,7 @@ interface WaterfallRow {
             <div class="frame">
               <div class="frame-h">Trend</div>
               <div class="frame-v num" [style.color]="trendColor(o)">
-                {{ o.references?.trend?.delta !== null && o.references?.trend?.delta !== undefined
-                    ? pts(o.references!.trend!.delta) : '—' }}
+                {{ fmtFrameDelta(o.references?.trend?.delta) }}
               </div>
               <div class="frame-s num">
                 prior {{ fmtValue(o.references?.trend?.prior ?? null) }}
@@ -164,7 +170,7 @@ interface WaterfallRow {
                 <div class="frame-s num">
                   target {{ fmtValue(o.references!.sla!.target) }}
                   @if (o.references?.sla?.delta !== null && o.references?.sla?.delta !== undefined) {
-                    &middot; {{ pts(o.references!.sla!.delta) }}
+                    &middot; {{ fmtFrameDelta(o.references!.sla!.delta) }} away
                   }
                 </div>
               } @else {
@@ -1018,6 +1024,23 @@ export class IncidentComponent implements OnInit, OnChanges {
       default:
         return `${sign}${magnitude.toFixed(2)}`;
     }
+  }
+
+  /**
+   * A signed movement read from a reference frame ({@code Trend.delta}, {@code Sla.delta}).
+   *
+   * Separate from {@link fmtDelta} because the two sources disagree on scale. Attribution deltas
+   * and {@code Finding.deltaPts} arrive already scaled to percentage points; the reference frames
+   * arrive on the metric's native scale, where a rate is still a fraction — OTA moving 2.23 points
+   * is delivered as 0.0223. Sharing one formatter is what rendered "+16.16 pts" against a currency
+   * and "+0.00 pts" against a real 0.31-point SLA gap.
+   *
+   * Kept as two functions rather than one with a flag: the scale is a property of where the number
+   * came from, not a display option, and a caller that has to remember which to pass will forget.
+   */
+  fmtFrameDelta(v: number | null | undefined): string {
+    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+    return this.unit() === 'rate' ? this.fmtDelta(v * 100) : this.fmtDelta(v);
   }
 
   trendColor(o: MetricObservation): string {

@@ -606,8 +606,13 @@ export class DashboardComponent implements OnInit {
   deltaText(k: Kpi): string {
     const d = k.obs?.references?.trend?.delta;
     if (d === null || d === undefined) return '—';
-    // Rate metrics carry their delta in points already (see Trend javadoc).
-    return k.unit === 'rate' ? pts(d) : byUnit(Math.abs(d), k.unit);
+    // Trend.delta arrives on the metric's OWN scale, so a rate is a fraction (0.0223) and not
+    // percentage points (2.23). Finding.deltaPts and the attribution deltas are already scaled to
+    // points, which is the trap: one payload carries two scales, and a formatter that is correct
+    // for one silently under-reports the other by 100x. That is exactly what shipped — this tile
+    // read "+0.02 pts" while the brief said "+2.23 pts" about the same movement, and two panels
+    // disagreeing on screen costs more credibility than either number is worth.
+    return k.unit === 'rate' ? pts(d * 100) : byUnit(Math.abs(d), k.unit);
   }
 
   deltaGlyph(k: Kpi): string {
