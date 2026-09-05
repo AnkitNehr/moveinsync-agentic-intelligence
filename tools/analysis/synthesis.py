@@ -392,13 +392,13 @@ def s_emp():
     show("V27 not-boarded vs is_no_show by BU (claimed pinnacle 14.87 > vanta-Sea 13.27)", """
       SELECT business_unit, count(*) legs,
              round(100.0*avg(CASE WHEN boarding_status='Not Boarded' THEN 1 ELSE 0 END),2) not_boarded_pct,
-             round(100.0*avg(CASE WHEN is_no_show='true' THEN 1 ELSE 0 END),2) noshow_flag_pct,
+             round(100.0*avg(CASE WHEN is_no_show='True' THEN 1 ELSE 0 END),2) noshow_flag_pct,
              round(100.0*avg(CASE WHEN not_boarding_reason='TRIP_CANCELLED_FROM_DASHBOARD' THEN 1 ELSE 0 END),2) cancel_pct
       FROM emp GROUP BY 1 ORDER BY 3 DESC
     """)
     show("V27b the two global no-show definitions (claimed 11.601 vs 7.206)", """
       SELECT round(100.0*avg(CASE WHEN boarding_status='Not Boarded' THEN 1 ELSE 0 END),3) by_status,
-             round(100.0*avg(CASE WHEN is_no_show='true' THEN 1 ELSE 0 END),3) by_flag,
+             round(100.0*avg(CASE WHEN is_no_show='True' THEN 1 ELSE 0 END),3) by_flag,
              count(*) FILTER (WHERE not_boarding_reason='TRIP_CANCELLED_FROM_DASHBOARD') n_cancel
       FROM emp
     """)

@@ -22,6 +22,7 @@ import com.moveinsync.mi.pipeline.spi.ChatPort;
 import com.moveinsync.mi.pipeline.spi.UsageLedger;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -29,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,6 +92,47 @@ public final class BuiltInChatRouter implements ChatPort {
      */
     private static final Map<String, String> SYNONYMS = synonyms();
 
+    /**
+     * Words that mean "rank these and tell me the extreme one" rather than "give me a number".
+     * "Which office had the worst OTA" is a different question from "what was OTA", and answering
+     * the second when asked the first is worse than declining — it looks like an answer.
+     */
+    private static final List<String> SUPERLATIVES =
+            List.of("worst", "best", "highest", "lowest", "top ", "bottom", "most", "least",
+                    "which ", "who ", "rank", "compare");
+
+    /** Natural phrasing to the grain it means, longest first so "business unit" beats "unit". */
+    private static final Map<String, String> DIMENSION_WORDS = dimensionWords();
+
+    /**
+     * Plain-English names for grains. A transport manager does not think in column names, and
+     * "trip_direction" on screen is a tell that nobody translated the schema into English.
+     */
+    private static final Map<String, String> DIMENSION_LABELS = Map.of(
+            "trip_direction", "the morning/evening split",
+            "product_type", "the type of vehicle",
+            "route_source", "how the route was planned",
+            "business_unit", "business unit",
+            "shift_type", "shift",
+            "trip_nodal", "pickup type",
+            "slab_name", "billing slab",
+            "office", "office",
+            "vendor", "vendor",
+            "contract", "contract");
+
+    /** Codes that appear in the data but mean nothing to a reader without a gloss. */
+    private static final Map<String, String> ENTITY_GLOSS = Map.of(
+            "LOGIN", "morning pickups",
+            "LOGOUT", "evening drop-offs",
+            "BUS", "buses",
+            "CAB", "cabs",
+            "MANUAL", "hand-planned routes",
+            "AUTO", "system-planned routes",
+            "NODAL", "nodal-point pickups",
+            "HOME", "home pickups",
+            "SHUTTLE", "shuttle trips",
+            "SPOT_2.0", "spot-booked trips");
+
     private final MetricCatalog catalog;
     private final MetricQueryService metrics;
     private final BenchmarkService benchmarks;
@@ -136,9 +179,162 @@ public final class BuiltInChatRouter implements ChatPort {
         boolean wantsAttribution = ATTRIBUTION_WORDS.stream().anyMatch(normalised::contains);
         Slice slice = resolveEntity(metricId, period, normalised);
 
+        // "Which office had the worst OTA" asks for a ranking, not a number. Returning the global
+        // figure would look like an answer while silently ignoring both "office" and "worst", so
+        // this is checked before the plain observation path — but only when no specific entity was
+        // named, since "OTA for Denver Office" is a lookup even if it contains a ranking word.
+        if (MetricSpec.GLOBAL.equals(slice.dimension()) && !wantsAttribution) {
+            String rankGrain = resolveRankedDimension(metricId, normalised);
+            if (rankGrain != null) {
+                return rankingAnswer(metricId, period, rankGrain, normalised);
+            }
+        }
+
         return wantsAttribution
                 ? attributionAnswer(metricId, period, slice)
                 : observationAnswer(metricId, period, slice);
+    }
+
+    /**
+     * Returns the grain to rank by when the question is a superlative about a dimension, else null.
+     * Both halves must be present: "worst" alone has nothing to rank, and "office" alone is a filter
+     * rather than a ranking request.
+     */
+    private String resolveRankedDimension(String metricId, String normalisedQuestion) {
+        boolean superlative = SUPERLATIVES.stream().anyMatch(normalisedQuestion::contains);
+        if (!superlative) {
+            return null;
+        }
+        List<String> grains = catalog.find(metricId)
+                .map(MetricDefinition::sliceableGrains)
+                .orElse(List.of());
+
+        for (Map.Entry<String, String> entry : DIMENSION_WORDS.entrySet()) {
+            if (normalisedQuestion.contains(entry.getKey()) && grains.contains(entry.getValue())) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Ranks every entity in a grain and reports the extreme one the question asked for, plus enough
+     * of the tail to make it interpretable. Direction-aware: "worst" means the lowest on-time rate
+     * but the highest cost, which is exactly why direction is declared in the catalog.
+     */
+    private Answer rankingAnswer(String metricId, String period, String grain, String normalisedQuestion) {
+        boolean wantsBest = normalisedQuestion.contains("best")
+                || normalisedQuestion.contains("highest")
+                || normalisedQuestion.contains("most");
+        boolean higherIsBetter = catalog.find(metricId)
+                .map(MetricDefinition::higherIsBetter)
+                .orElse(true);
+        // "worst" on a higher-is-better metric means ascending; on cost it means descending.
+        boolean ascending = wantsBest != higherIsBetter;
+
+        List<MetricSlice> ranked;
+        try {
+            ranked = metrics.slices(metricId, grain, period).stream()
+                    .filter(MetricSlice::measured)
+                    .sorted(ascending
+                            ? Comparator.comparingDouble(MetricSlice::value)
+                            : Comparator.comparingDouble((MetricSlice s) -> s.value()).reversed())
+                    .toList();
+        } catch (RuntimeException e) {
+            log.warn("Ranking failed for {} by {}: {}", metricId, grain, e.toString());
+            return observationAnswer(metricId, period, Slice.global());
+        }
+
+        if (ranked.isEmpty()) {
+            return observationAnswer(metricId, period, Slice.global());
+        }
+
+        MetricSlice leader = ranked.getFirst();
+        String label = format.label(metricId);
+        String dimensionLabel = DIMENSION_LABELS.getOrDefault(grain, grain.replace('_', ' '));
+        List<Evidence> citations = new ArrayList<>();
+        StringBuilder answer = new StringBuilder(512);
+
+        String headline = "%s had the %s %s in %s, at %s across %,d trips.".formatted(
+                glossed(leader.entity()),
+                wantsBest ? "best" : "worst",
+                label.toLowerCase(Locale.ROOT),
+                friendlyPeriod(period),
+                format.value(metricId, leader.value()),
+                leader.sampleSize());
+        answer.append(headline).append(' ');
+        citations.add(new Evidence(headline, metricId, leader.entity()));
+
+        if (ranked.size() > 1) {
+            MetricSlice other = ranked.get(ranked.size() - 1);
+            String spread = "For comparison, %s was %s at %s, and the middle of the %d %ss sits at %s."
+                    .formatted(
+                            glossed(other.entity()),
+                            wantsBest ? "the weakest" : "the strongest",
+                            format.value(metricId, other.value()),
+                            ranked.size(),
+                            dimensionLabel,
+                            format.value(metricId, median(ranked)));
+            answer.append(spread).append(' ');
+            citations.add(new Evidence(spread, metricId, other.entity()));
+        }
+
+        if (ranked.size() > 2) {
+            String runners = ranked.stream().skip(1).limit(3)
+                    .map(s -> glossed(s.entity()) + " " + format.value(metricId, s.value()))
+                    .collect(Collectors.joining(", "));
+            answer.append("Next after ").append(glossed(leader.entity())).append(": ")
+                    .append(runners).append('.');
+        }
+
+        return new Answer(
+                answer.toString().trim(),
+                new ResolvedCall(TOOL_OBSERVE, metricId, grain, leader.entity(), period),
+                citations,
+                UsageLedger.Usage.ZERO,
+                false);
+    }
+
+    private static double median(List<MetricSlice> sorted) {
+        List<Double> values = sorted.stream()
+                .map(MetricSlice::value)
+                .sorted()
+                .toList();
+        int n = values.size();
+        return n % 2 == 1 ? values.get(n / 2) : (values.get(n / 2 - 1) + values.get(n / 2)) / 2.0;
+    }
+
+    /**
+     * The size of a movement without its sign, for sentences where a verb already says the
+     * direction. {@code format.effect} always signs its output, which is right in a table and wrong
+     * next to the word "fell".
+     */
+    private String magnitude(String metricId, double value) {
+        String formatted = format.effect(metricId, Math.abs(value));
+        return formatted.startsWith("+") || formatted.startsWith("-")
+                ? formatted.substring(1)
+                : formatted;
+    }
+
+    /** Adds a plain-English gloss to codes that mean nothing on their own. */
+    private static String glossed(String entity) {
+        String gloss = entity == null ? null : ENTITY_GLOSS.get(entity);
+        return gloss == null ? entity : entity + " (" + gloss + ")";
+    }
+
+    /** "2026-06" reads as a database key; "June 2026" reads as a month. */
+    private static String friendlyPeriod(String period) {
+        if (period == null || period.length() != 7 || period.charAt(4) != '-') {
+            return String.valueOf(period);
+        }
+        String[] names = {"January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"};
+        try {
+            int month = Integer.parseInt(period.substring(5));
+            return names[month - 1] + " " + period.substring(0, 4);
+        } catch (RuntimeException e) {
+            return period;
+        }
     }
 
     @Override
@@ -254,8 +450,14 @@ public final class BuiltInChatRouter implements ChatPort {
         if (observation.quality() == null) {
             return;
         }
-        answer.append("Confidence %s on %.1f%% coverage.".formatted(
-                observation.quality().confidence(), observation.quality().coverage() * 100.0));
+        // Full coverage needs no sentence — saying "100.0% coverage" on every answer trains the
+        // reader to skip the line, which is exactly when you need them to notice a partial one.
+        double coverage = observation.quality().coverage();
+        if (coverage >= 0.999) {
+            return;
+        }
+        answer.append("Based on %.0f%% of the underlying records, so treat this as indicative."
+                .formatted(coverage * 100.0));
     }
 
     // ---- attribute --------------------------------------------------------------------------------
@@ -281,15 +483,24 @@ public final class BuiltInChatRouter implements ChatPort {
 
         DimensionAttribution winner = result.ranked().getFirst();
 
-        String movement = "%s moved %s between %s and %s.".formatted(
-                format.label(metricId), format.effect(metricId, result.actualDelta()), priorPeriod, period);
+        // Written for a transport manager, not an analyst. The maths is unchanged; the vocabulary is
+        // not. "Explanatory power 0.83, concentration 1.00 across 2 entities" is true and useless to
+        // the person who has to act on it before the morning shift.
+        // The verb already carries the direction, so the number must not repeat it — "fell +2.86"
+        // reads as a contradiction and undermines every figure next to it.
+        String movement = "%s %s %s between %s and %s.".formatted(
+                format.label(metricId),
+                result.actualDelta() < 0 ? "fell" : "rose",
+                magnitude(metricId, result.actualDelta()),
+                friendlyPeriod(priorPeriod),
+                friendlyPeriod(period));
         answer.append(movement).append(' ');
         citations.add(new Evidence(movement, metricId, MetricSpec.ALL));
 
-        String winnerClaim = ("Of the %d decomposable dimensions, %s explains it best (explanatory power "
-                + "%.2f, concentration %.2f across %d entities).").formatted(
-                result.ranked().size(), winner.dimension(),
-                winner.explanatoryPower(), winner.concentration(), winner.entityCount());
+        String dimensionLabel =
+                DIMENSION_LABELS.getOrDefault(winner.dimension(), winner.dimension().replace('_', ' '));
+        String winnerClaim = ("The change is concentrated rather than spread evenly. Of the %d ways this "
+                + "can be broken down, %s explains it best.").formatted(result.ranked().size(), dimensionLabel);
         answer.append(winnerClaim).append(' ');
         citations.add(new Evidence(winnerClaim, metricId, winner.dimension()));
 
@@ -300,24 +511,47 @@ public final class BuiltInChatRouter implements ChatPort {
                 if (!contributors.isEmpty()) {
                     contributors.append("; ");
                 }
-                contributors.append("%s (%s total, of which %s rate and %s mix)".formatted(
-                        contribution.entity(),
-                        format.effect(metricId, contribution.total()),
-                        format.effect(metricId, contribution.rateEffect()),
-                        format.effect(metricId, contribution.mixEffect())));
+                contributors.append("%s accounts for %s".formatted(
+                        glossed(contribution.entity()),
+                        format.effect(metricId, contribution.total())));
                 citations.add(new Evidence(
                         "%s contributed %s to the movement.".formatted(
                                 contribution.entity(), format.effect(metricId, contribution.total())),
                         metricId, contribution.entity()));
             }
-            answer.append("The leading contributors are ").append(contributors).append(". ");
+            answer.append("Breaking it down: ").append(contributors).append(". ");
+
+            // The rate-vs-mix distinction is the whole point of the decomposition, and it is the one
+            // thing a reader cannot infer from the totals. Say it in words, not in column names.
+            Contribution lead = top.getFirst();
+            double rate = Math.abs(lead.rateEffect());
+            double mix = Math.abs(lead.mixEffect());
+            if (rate + mix > 0) {
+                String cause = rate >= mix
+                        ? ("This is a performance change, not a volume change: of %s's %s, %s is the "
+                                + "trips themselves getting worse and only %s comes from how many trips "
+                                + "it handled. Moving volume around will not fix it.")
+                                .formatted(lead.entity(),
+                                        format.effect(metricId, lead.total()),
+                                        format.effect(metricId, lead.rateEffect()),
+                                        format.effect(metricId, lead.mixEffect()))
+                        : ("This is mostly a volume shift, not a performance drop: of %s's %s, %s comes "
+                                + "from it handling a different share of trips and only %s from the trips "
+                                + "themselves changing. Look at how work is being allocated.")
+                                .formatted(lead.entity(),
+                                        format.effect(metricId, lead.total()),
+                                        format.effect(metricId, lead.mixEffect()),
+                                        format.effect(metricId, lead.rateEffect()));
+                answer.append(cause).append(' ');
+                citations.add(new Evidence(cause, metricId, lead.entity()));
+            }
         }
 
         String reconciliation = winner.reconciles(1e-6)
-                ? "The decomposition reconciles to the aggregate movement."
-                : "The decomposition leaves %s unaccounted for, which is volume held back by the "
-                        .formatted(format.effect(metricId, winner.reconciliationError()))
-                        + "minimum-sample gate rather than an arithmetic error.";
+                ? "The parts add up to the whole, so nothing is unaccounted for."
+                : ("%s of the movement is unaccounted for — that is volume held back by the "
+                        + "minimum-sample gate, not an arithmetic error.")
+                        .formatted(format.effect(metricId, winner.reconciliationError()));
         answer.append(reconciliation);
         citations.add(new Evidence(reconciliation, metricId, winner.dimension()));
 
@@ -465,6 +699,33 @@ public final class BuiltInChatRouter implements ChatPort {
         table.put("may", "05");
         // Collections.unmodifiableMap, not Map.copyOf: Map.copyOf does not preserve iteration order,
         // and the ordering above is load-bearing.
+        return Collections.unmodifiableMap(table);
+    }
+
+    /**
+     * How a person names a dimension, mapped to the grain it means. Insertion order matters: the
+     * longest phrases are checked first so "business unit" is not shadowed by "unit".
+     */
+    private static Map<String, String> dimensionWords() {
+        Map<String, String> table = new LinkedHashMap<>();
+        table.put("business unit", "business_unit");
+        table.put("route source", "route_source");
+        table.put("product type", "product_type");
+        table.put("trip direction", "trip_direction");
+        table.put("billing slab", "slab_name");
+        table.put("pickup type", "trip_nodal");
+        table.put("contract", "contract");
+        table.put("offices", "office");
+        table.put("office", "office");
+        table.put("campus", "office");
+        table.put("site", "office");
+        table.put("vendors", "vendor");
+        table.put("vendor", "vendor");
+        table.put("supplier", "vendor");
+        table.put("shifts", "shift_type");
+        table.put("shift", "shift_type");
+        table.put("direction", "trip_direction");
+        table.put("slab", "slab_name");
         return Collections.unmodifiableMap(table);
     }
 
