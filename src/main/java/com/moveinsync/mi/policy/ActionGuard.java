@@ -1,10 +1,14 @@
 package com.moveinsync.mi.policy;
 
+import com.moveinsync.mi.attribution.AttributionResult;
+import com.moveinsync.mi.delivery.OwnerRouter;
 import com.moveinsync.mi.model.Action;
-import com.moveinsync.mi.model.Evidence;
 import com.moveinsync.mi.model.Incident;
 import com.moveinsync.mi.model.PolicyDecision;
 import java.util.List;
+import java.util.Locale;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -19,121 +23,170 @@ import org.springframework.stereotype.Service;
  * <h2>The ladder</h2>
  * <ul>
  *   <li>{@link #NOTIFY} — always permitted. Telling someone what happened changes nothing on the
- *       ground and carries no downside risk.</li>
- *   <li>{@link #VENDOR_ESCALATION} — permitted only once the breach has persisted for at least
- *       {@link SlaPolicy#ESCALATION_MIN_CONSECUTIVE_PERIODS} consecutive periods. One bad month is
- *       noise; two in a row is a pattern worth putting in front of a vendor.</li>
- *   <li>{@link #REVIEW_ALLOCATION} — never auto-permitted. Reallocating volume changes cost exposure
- *       and contractual commitments, so it requires human approval however clear the data looks.</li>
- *   <li>{@link #AUTO_REALLOCATE} — never permitted under any circumstances. It is emitted only so
- *       that the refusal is on the record.</li>
+ *       ground and carries no downside risk. The recipient is chosen by {@link OwnerRouter}, not
+ *       copied from the first evidence entity.</li>
+ *   <li>{@link #VENDOR_ESCALATION} — permitted only when the breach has persisted for at least
+ *       {@link SlaPolicy#ESCALATION_MIN_CONSECUTIVE_PERIODS} consecutive periods <em>and</em> the
+ *       attribution evidence says vendors actually explain the movement. Persistence without vendor
+ *       signal is a routing-desk conversation, not a vendor letter.</li>
+ *   <li>{@link #REVIEW_ALLOCATION} — never auto-permitted.</li>
+ *   <li>{@link #AUTO_REALLOCATE} — never permitted under any circumstances.</li>
  * </ul>
- *
- * <p>Deterministic: the same incident and decision always produce the same list, in the same order.
  */
 @Service
 public class ActionGuard {
 
-    /** Inform the owning stakeholders. Always permitted. */
     public static final String NOTIFY = "notify";
-    /** Raise the breach formally with the vendor. Permitted from the second consecutive breach. */
     public static final String VENDOR_ESCALATION = "vendor_escalation";
-    /** Reconsider how volume is distributed. Always requires human approval. */
     public static final String REVIEW_ALLOCATION = "review_allocation";
-    /** Autonomously move volume between vendors. Never permitted. */
     public static final String AUTO_REALLOCATE = "auto_reallocate";
 
-    private static final String DEFAULT_TARGET = "operations";
+    public static final double DEFAULT_VENDOR_ESCALATION_MIN_POWER = 0.25;
+
+    private final double vendorEscalationMinPower;
+
+    public ActionGuard() {
+        this(DEFAULT_VENDOR_ESCALATION_MIN_POWER);
+    }
+
+    @Autowired
+    public ActionGuard(
+            @Value("${app.policy.vendor-escalation-min-power:0.25}") double vendorEscalationMinPower) {
+        this.vendorEscalationMinPower = Double.isFinite(vendorEscalationMinPower)
+                ? Math.clamp(vendorEscalationMinPower, 0.0, 1.0)
+                : DEFAULT_VENDOR_ESCALATION_MIN_POWER;
+    }
+
+    public List<Action> permittedActions(Incident incident, PolicyDecision decision) {
+        return permittedActions(incident, decision, null);
+    }
+
+    public List<Action> permittedActions(Incident incident) {
+        return permittedActions(incident, incident == null ? null : incident.policy(), null);
+    }
 
     /**
      * Produces the policy-gated action list for an incident.
      *
-     * @param incident the incident under consideration; may be null, in which case a generic target
-     *                 is used and the ladder is still fully reported
-     * @param decision the governing SLA verdict; a null decision is treated as zero breach depth
-     * @return four actions in fixed order, each with {@code permitted} and {@code reason} populated
+     * @param incident    the incident under consideration
+     * @param decision    the governing SLA verdict; a null decision is treated as zero breach depth
+     * @param attribution ranked dimension decompositions; null means vendor evidence is absent
      */
-    public List<Action> permittedActions(Incident incident, PolicyDecision decision) {
-        String target = targetFor(incident);
+    public List<Action> permittedActions(
+            Incident incident, PolicyDecision decision, AttributionResult attribution) {
+
+        OwnerRouter.Owner owner = OwnerRouter.route(incident, attribution);
         int consecutivePeriods = decision == null ? 0 : Math.max(0, decision.consecutivePeriods());
-        boolean escalationEarned = consecutivePeriods >= SlaPolicy.ESCALATION_MIN_CONSECUTIVE_PERIODS;
+        boolean persistenceEarned = consecutivePeriods >= SlaPolicy.ESCALATION_MIN_CONSECUTIVE_PERIODS;
+        VendorEvidence vendor = VendorEvidence.of(attribution, vendorEscalationMinPower);
+        boolean vendorPermitted = persistenceEarned && vendor.supportsEscalation();
 
         return List.of(
                 new Action(
                         NOTIFY,
-                        target,
+                        owner.recipient(),
                         true,
-                        "Notification is always permitted: it informs the owning team without "
-                                + "altering allocation, contracts or cost exposure."),
+                        "Notification is always permitted: it informs " + owner.recipient()
+                                + " without altering allocation, contracts or cost exposure."),
                 new Action(
                         VENDOR_ESCALATION,
-                        target,
-                        escalationEarned,
-                        escalationEarned
-                                ? "Breach sustained for " + consecutivePeriods
-                                        + " consecutive periods, which meets the "
-                                        + SlaPolicy.ESCALATION_MIN_CONSECUTIVE_PERIODS
-                                        + "-period threshold for formal vendor escalation."
-                                : "Breach depth is " + consecutivePeriods + " period(s); formal vendor "
-                                        + "escalation requires at least "
-                                        + SlaPolicy.ESCALATION_MIN_CONSECUTIVE_PERIODS
-                                        + " consecutive periods so a single-period dip is not "
-                                        + "treated as a pattern."),
+                        owner.desk().equals("vendor") ? owner.recipient() : "Vendor operations",
+                        vendorPermitted,
+                        vendorEscalationReason(persistenceEarned, consecutivePeriods, vendor, owner)),
                 new Action(
                         REVIEW_ALLOCATION,
-                        target,
+                        owner.recipient(),
                         false,
                         "Allocation review shifts volume between vendors and changes cost and "
                                 + "contractual exposure; it is never auto-permitted and requires "
                                 + "explicit human approval."),
                 new Action(
                         AUTO_REALLOCATE,
-                        target,
+                        owner.recipient(),
                         false,
                         "Autonomous reallocation is never permitted by policy. The platform "
                                 + "recommends; a human decides and executes."));
     }
 
-    /**
-     * Convenience overload for incidents that already carry their own {@link PolicyDecision}.
-     */
-    public List<Action> permittedActions(Incident incident) {
-        return permittedActions(incident, incident == null ? null : incident.policy());
+    public boolean isPermitted(String actionType, Incident incident, PolicyDecision decision) {
+        return isPermitted(actionType, incident, decision, null);
     }
 
-    /** Whether a specific action type is permitted for this incident. */
-    public boolean isPermitted(String actionType, Incident incident, PolicyDecision decision) {
+    public boolean isPermitted(
+            String actionType, Incident incident, PolicyDecision decision, AttributionResult attribution) {
         if (actionType == null) {
             return false;
         }
-        return permittedActions(incident, decision).stream()
+        return permittedActions(incident, decision, attribution).stream()
                 .filter(action -> actionType.equalsIgnoreCase(action.type()))
                 .findFirst()
                 .map(Action::permitted)
                 .orElse(false);
     }
 
+    public double vendorEscalationMinPower() {
+        return vendorEscalationMinPower;
+    }
+
+    private static String vendorEscalationReason(
+            boolean persistenceEarned, int consecutivePeriods, VendorEvidence vendor, OwnerRouter.Owner owner) {
+
+        if (vendorPermitted(persistenceEarned, vendor)) {
+            return "Breach sustained for " + consecutivePeriods
+                    + " consecutive periods and vendor explanatory power "
+                    + formatPower(vendor.power())
+                    + " meets the evidence bar. Formal vendor escalation is permitted.";
+        }
+        String persistenceBit = persistenceEarned
+                ? "Breach depth is " + consecutivePeriods + " period(s), which meets the persistence bar"
+                : "Breach depth is " + consecutivePeriods + " period(s); formal vendor escalation "
+                        + "requires at least " + SlaPolicy.ESCALATION_MIN_CONSECUTIVE_PERIODS
+                        + " consecutive periods so a single-period dip is not treated as a pattern";
+        return persistenceBit + ", but " + vendor.reason()
+                + " " + owner.recipient() + " is the owner.";
+    }
+
+    private static boolean vendorPermitted(boolean persistenceEarned, VendorEvidence vendor) {
+        return persistenceEarned && vendor.supportsEscalation();
+    }
+
+    private static String formatPower(double power) {
+        return String.format(Locale.ROOT, "%.2f", power);
+    }
+
     /**
-     * Resolves who the actions are aimed at.
-     *
-     * <p>Prefers the entity named by the incident's first evidence item, which is the dimension
-     * member the narrative is actually about (a vendor id, an office, a product type). Falls back
-     * through the finding ids to a generic owner so an action never carries a null target.
+     * Whether vendors actually explain the movement, as opposed to merely being a grain we scanned.
      */
-    private String targetFor(Incident incident) {
-        if (incident == null) {
-            return DEFAULT_TARGET;
-        }
-        for (Evidence evidence : incident.evidence()) {
-            if (evidence != null && evidence.entity() != null && !evidence.entity().isBlank()) {
-                return evidence.entity();
+    record VendorEvidence(boolean supportsEscalation, double power, String reason) {
+
+        static VendorEvidence of(AttributionResult attribution, double minPower) {
+            if (attribution == null || attribution.ranked().isEmpty()) {
+                return new VendorEvidence(
+                        false,
+                        0.0,
+                        "vendor mix has not been shown to explain this movement (no attribution attached);");
             }
-        }
-        for (String findingId : incident.findingIds()) {
-            if (findingId != null && !findingId.isBlank()) {
-                return findingId;
+            double power = OwnerRouter.vendorPower(attribution);
+            String winner = OwnerRouter.winnerDimension(attribution);
+            if (OwnerRouter.isVendorDimension(winner)) {
+                return new VendorEvidence(
+                        true,
+                        power,
+                        "vendor is the winning dimension (explanatory power " + formatPower(power) + ");");
             }
+            if (power + 1e-12 >= minPower) {
+                return new VendorEvidence(
+                        true,
+                        power,
+                        "vendor explanatory power " + formatPower(power) + " meets the "
+                                + formatPower(minPower) + " bar;");
+            }
+            return new VendorEvidence(
+                    false,
+                    power,
+                    "vendor explanatory power " + formatPower(power)
+                            + " is below the " + formatPower(minPower)
+                            + " bar;");
         }
-        return incident.id() == null || incident.id().isBlank() ? DEFAULT_TARGET : incident.id();
     }
 }

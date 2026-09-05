@@ -9,8 +9,10 @@ import {
   computed,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
 import type {
+  Action,
   AttributionView,
   Contribution,
   Incident,
@@ -56,7 +58,7 @@ interface WaterfallRow {
 @Component({
   selector: 'mi-incident',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   template: `
     @if (!incidentId) {
       <section class="panel empty">
@@ -379,8 +381,9 @@ interface WaterfallRow {
               <button
                 class="action"
                 [class.blocked]="!a.permitted"
-                [disabled]="!a.permitted"
-                [title]="a.permitted ? a.reason : 'Blocked: ' + a.reason">
+                [disabled]="acting() || (!clickable(a))"
+                [title]="a.permitted ? a.reason : 'Blocked: ' + a.reason"
+                (click)="onAction(a)">
                 <span class="a-type">{{ a.type }}</span>
                 <span class="a-target">{{ a.target }}</span>
                 @if (!a.permitted) { <span class="a-lock" aria-hidden="true">&#128274;</span> }
@@ -388,8 +391,21 @@ interface WaterfallRow {
             }
           </div>
 
-          <!-- Reasons are also rendered inline: a tooltip is not accessible on
-               touch, and a blocked action without a visible reason is noise. -->
+          <div class="ops">
+            <label class="recheck">
+              Re-check period
+              <input type="text" [(ngModel)]="recheckPeriod" size="9" />
+            </label>
+            <button class="ghost" (click)="runRecheck()" [disabled]="acting()">
+              Run follow-up now
+            </button>
+            <button class="ghost" (click)="dismiss()" [disabled]="acting()">Dismiss</button>
+          </div>
+
+          @if (actionMessage()) {
+            <p class="action-msg" [class.bad]="actionError()">{{ actionMessage() }}</p>
+          }
+
           <ul class="reasons">
             @for (a of inc.recommendedActions; track a.type + a.target) {
               @if (!a.permitted) {
@@ -885,6 +901,58 @@ interface WaterfallRow {
         max-width: 88ch;
       }
 
+      .ops {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-top: 12px;
+      }
+
+      .recheck {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--ink-muted);
+        font-weight: 600;
+      }
+
+      .recheck input {
+        font: inherit;
+        font-size: 12.5px;
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 500;
+        padding: 5px 8px;
+        border-radius: var(--radius);
+        border: 1px solid var(--line-strong);
+        background: var(--surface-2);
+        color: var(--ink);
+      }
+
+      button.ghost {
+        background: var(--surface-2);
+        color: var(--ink-2);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        padding: 7px 12px;
+        font-size: 12px;
+        font-weight: 550;
+      }
+
+      .action-msg {
+        margin: 10px 0 0;
+        font-size: 12.5px;
+        color: var(--ink-2);
+      }
+
+      .action-msg.bad {
+        color: var(--critical);
+      }
+
       /* ---- picker ---- */
       .empty h2 {
         margin-bottom: 2px;
@@ -947,6 +1015,10 @@ export class IncidentComponent implements OnInit, OnChanges {
   readonly attributionError = signal<string | null>(null);
   readonly error = signal<string | null>(null);
   readonly allIncidents = signal<Incident[]>([]);
+  readonly acting = signal(false);
+  readonly actionMessage = signal<string | null>(null);
+  readonly actionError = signal(false);
+  recheckPeriod = '2026-07';
 
   /** The metric unit drives value formatting across every frame on this page. */
   private readonly unit = signal<string>('rate');
@@ -993,6 +1065,76 @@ export class IncidentComponent implements OnInit, OnChanges {
   select(id: string): void {
     this.incidentId = id;
     void this.load();
+  }
+
+  clickable(a: Action): boolean {
+    return a.type === 'notify' || a.type === 'vendor_escalation';
+  }
+
+  async onAction(a: Action): Promise<void> {
+    if (!this.incidentId) return;
+    this.acting.set(true);
+    this.actionError.set(false);
+    this.actionMessage.set(null);
+    try {
+      if (a.type === 'notify') {
+        const sent = await this.api.notifyIncident(this.incidentId);
+        this.actionMessage.set(`Sent to ${sent.recipient} (${sent.status}). Open Outbox to read it.`);
+      } else if (a.type === 'vendor_escalation') {
+        const result = await this.api.escalateIncident(this.incidentId);
+        if (result.status === 403 || !result.body.escalated) {
+          this.actionError.set(true);
+          this.actionMessage.set(result.body.action?.reason ?? 'Vendor escalation refused by policy.');
+        } else {
+          this.incident.set(result.body.incident);
+          this.actionMessage.set(`Escalated to ${result.body.action.target}.`);
+        }
+      }
+    } catch (e) {
+      this.actionError.set(true);
+      this.actionMessage.set(e instanceof Error ? e.message : String(e));
+    } finally {
+      this.acting.set(false);
+    }
+  }
+
+  async runRecheck(): Promise<void> {
+    if (!this.incidentId) return;
+    this.acting.set(true);
+    this.actionError.set(false);
+    this.actionMessage.set(null);
+    try {
+      const result = await this.api.recheckIncident(this.incidentId, this.recheckPeriod.trim() || undefined);
+      this.incident.set(result.incident);
+      const follow = result.followUp?.status ?? 'unknown';
+      const extra = result.escalations?.length
+        ? ` Raised ${result.escalations.map((e) => e.id).join(', ')}.`
+        : '';
+      this.actionMessage.set(
+        `Follow-up ${follow} — incident is now ${result.incident.status}.${extra} Check Outbox.`,
+      );
+    } catch (e) {
+      this.actionError.set(true);
+      this.actionMessage.set(e instanceof Error ? e.message : String(e));
+    } finally {
+      this.acting.set(false);
+    }
+  }
+
+  async dismiss(): Promise<void> {
+    if (!this.incidentId) return;
+    this.acting.set(true);
+    this.actionError.set(false);
+    try {
+      const dismissed = await this.api.dismissIncident(this.incidentId, 'dismissed from console');
+      this.incident.set(dismissed);
+      this.actionMessage.set('Dismissed. The ranker will suppress this pattern on the next run.');
+    } catch (e) {
+      this.actionError.set(true);
+      this.actionMessage.set(e instanceof Error ? e.message : String(e));
+    } finally {
+      this.acting.set(false);
+    }
   }
 
   fmtValue(v: number | null): string {

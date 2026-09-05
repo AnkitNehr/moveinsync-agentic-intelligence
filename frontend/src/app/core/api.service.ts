@@ -4,11 +4,15 @@ import type {
   AttributionView,
   Brief,
   ChatResponse,
+  Communication,
+  EscalateResponse,
+  FollowUp,
   Health,
   Incident,
   LatestRun,
   MetricObservation,
   MetricSummary,
+  RecheckResponse,
   RunSummary,
 } from './models';
 
@@ -132,6 +136,58 @@ export class ApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     });
+  }
+
+  notifyIncident(id: string): Promise<Communication> {
+    return this.request<Communication>(`/incidents/${encodeURIComponent(id)}/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * 200 when permitted, 403 when policy refuses. The 403 body is the same
+   * EscalateResponse with {@code escalated: false} — not an ApiError — so this
+   * does not go through {@link request}.
+   */
+  async escalateIncident(id: string, note?: string): Promise<{ status: number; body: EscalateResponse }> {
+    const res = await fetch(`${this.base}/incidents/${encodeURIComponent(id)}/escalate`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: note ?? '' }),
+    });
+    const text = await res.text();
+    const parsed = text ? (this.tryParse(text) as EscalateResponse) : null;
+    if (!parsed) {
+      throw new HttpError(res.status, `${res.status} ${res.statusText}`, null);
+    }
+    return { status: res.status, body: parsed };
+  }
+
+  recheckIncident(id: string, period?: string): Promise<RecheckResponse> {
+    return this.request<RecheckResponse>(`/incidents/${encodeURIComponent(id)}/recheck`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ period: period ?? null }),
+    });
+  }
+
+  outbox(incidentId?: string): Promise<Communication[]> {
+    return this.request<Communication[]>(`/outbox${this.query({ incidentId })}`);
+  }
+
+  outboxItem(id: string): Promise<Communication> {
+    return this.request<Communication>(`/outbox/${encodeURIComponent(id)}`);
+  }
+
+  sendOutbox(id: string): Promise<Communication> {
+    return this.request<Communication>(`/outbox/${encodeURIComponent(id)}/send`, {
+      method: 'POST',
+    });
+  }
+
+  followUps(): Promise<FollowUp[]> {
+    return this.request<FollowUp[]>('/followups');
   }
 
   /** Ranked decomposition across every dimension the metric declares. */

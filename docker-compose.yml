@@ -8,8 +8,11 @@ services:
     volumes:
       # Gitignored extracts. Filenames contain spaces; the app globs them from this directory.
       - ./data/raw:/data/raw:ro
+      # Incident memory + outbox (incidents.json, outbox.json, audit.jsonl). Survives compose down.
+      - ./data/state:/data/state
     environment:
       APP_DATA_RAW_PATH: /data/raw
+      APP_STATE_DIR: /data/state
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
