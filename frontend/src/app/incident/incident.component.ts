@@ -149,13 +149,15 @@ interface WaterfallRow {
             <div class="frame">
               <div class="frame-h">Trend</div>
               <div class="frame-v num" [style.color]="trendColor(o)">
-                {{ fmtFrameDelta(o.references?.trend?.delta) }}
+                {{ fmtDelta(o.references?.trend?.delta) }}
               </div>
+              <!-- The z decides the wording; it is not the wording. Printing "robust z −5.8" here
+                   put a statistic directly under prose that had just described the same movement in
+                   plain English, and the frame is the one with a number in it, so the frame is what
+                   gets read. -->
               <div class="frame-s num">
                 prior {{ fmtValue(o.references?.trend?.prior ?? null) }}
-                @if (o.references?.trend?.robustZ !== null && o.references?.trend?.robustZ !== undefined) {
-                  &middot; robust z {{ signed(o.references!.trend!.robustZ, 1) }}
-                }
+                @if (unusualness(o); as u) { &middot; {{ u }} }
               </div>
             </div>
 
@@ -170,7 +172,7 @@ interface WaterfallRow {
                 <div class="frame-s num">
                   target {{ fmtValue(o.references!.sla!.target) }}
                   @if (o.references?.sla?.delta !== null && o.references?.sla?.delta !== undefined) {
-                    &middot; {{ fmtFrameDelta(o.references!.sla!.delta) }} away
+                    &middot; {{ fmtDelta(o.references!.sla!.delta) }} away
                   }
                 </div>
               } @else {
@@ -1005,15 +1007,29 @@ export class IncidentComponent implements OnInit, OnChanges {
   /**
    * A signed movement in the metric's own unit.
    *
-   * The attribution panel previously rendered every delta with `pts`, which is right for a rate and
-   * wrong for everything else — cost per trip moving by fifty rupees was shown as "+50.74 pts".
-   * Percentage points are a unit, not a decoration, and using them on a currency undermines the
-   * numbers beside them.
+   * Every delta this component renders — the attribution waterfall, the reconciliation line, the
+   * dimension table, the trend and SLA frames — arrives from the API on the metric's NATIVE scale.
+   * For a rate that means a fraction: OTA moving 2.23 percentage points is delivered as 0.0223, and
+   * a contribution of 1.65 points as 0.0165. So the rate branch scales; the others already carry
+   * their own units.
+   *
+   * The unit switch exists because `pts` is right for a rate and wrong for everything else — cost
+   * per trip moving by fifty rupees was once shown as "+50.74 pts". Percentage points are a unit,
+   * not a decoration.
+   *
+   * There used to be a second formatter here, split off on the belief that attribution deltas were
+   * already in points while only the reference frames were fractions. That belief was wrong — the
+   * API was never checked, it was inferred from the incident TITLE, which is built server-side from
+   * Finding.deltaPts and genuinely is in points. Nothing in this component reads deltaPts. The split
+   * therefore fixed the two frames and left every figure in the waterfall a hundred times too small,
+   * which is worse than the bug it replaced: a wrong number in the panel that exists to prove the
+   * arithmetic reconciles. One formatter, one documented scale, verified against a live response.
    */
   fmtDelta(v: number | null | undefined): string {
     if (v === null || v === undefined || !Number.isFinite(v)) return '—';
-    const sign = v > 0 ? '+' : v < 0 ? '−' : '';
-    const magnitude = Math.abs(v);
+    const scaled = this.unit() === 'rate' ? v * 100 : v;
+    const sign = scaled > 0 ? '+' : scaled < 0 ? '−' : '';
+    const magnitude = Math.abs(scaled);
     switch (this.unit()) {
       case 'currency':
         return `${sign}₹${magnitude.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -1027,20 +1043,18 @@ export class IncidentComponent implements OnInit, OnChanges {
   }
 
   /**
-   * A signed movement read from a reference frame ({@code Trend.delta}, {@code Sla.delta}).
+   * How unusual this movement is, in words — the same three bands the backend narrators use.
    *
-   * Separate from {@link fmtDelta} because the two sources disagree on scale. Attribution deltas
-   * and {@code Finding.deltaPts} arrive already scaled to percentage points; the reference frames
-   * arrive on the metric's native scale, where a rate is still a fraction — OTA moving 2.23 points
-   * is delivered as 0.0223. Sharing one formatter is what rendered "+16.16 pts" against a currency
-   * and "+0.00 pts" against a real 0.31-point SLA gap.
-   *
-   * Kept as two functions rather than one with a flag: the scale is a property of where the number
-   * came from, not a display option, and a caller that has to remember which to pass will forget.
+   * Returns '' when there is no score, which the template treats as "print nothing" rather than
+   * printing an empty separator.
    */
-  fmtFrameDelta(v: number | null | undefined): string {
-    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
-    return this.unit() === 'rate' ? this.fmtDelta(v * 100) : this.fmtDelta(v);
+  unusualness(o: MetricObservation): string {
+    const z = o.references?.trend?.robustZ;
+    if (z === null || z === undefined || !Number.isFinite(z)) return '';
+    const a = Math.abs(z);
+    if (a >= 3) return 'far outside its usual range';
+    if (a >= 2) return 'larger than its usual monthly move';
+    return 'within its usual range';
   }
 
   trendColor(o: MetricObservation): string {
