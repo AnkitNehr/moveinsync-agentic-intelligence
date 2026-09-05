@@ -24,6 +24,7 @@ import com.moveinsync.mi.pipeline.MetricFormat;
 import com.moveinsync.mi.pipeline.spi.ChatPort;
 import com.moveinsync.mi.pipeline.spi.UsageLedger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -1111,6 +1113,57 @@ public final class BuiltInChatRouter implements ChatPort {
      * <p>Longer entity names win, so "Clearwater Campus" is not shadowed by a shorter member whose
      * name is a substring of it. When nothing matches, the global aggregate is the honest default.
      */
+    private static final Set<String> COMMON_ENTITY_STOP_WORDS = Set.of(
+            "the", "a", "an", "and", "or", "for", "in", "on", "at", "to", "by", "of", "about",
+            "summarize", "summarise", "summary", "tell", "details", "profile", "overview",
+            "how", "what", "is", "are", "did", "performance", "look", "travel", "services",
+            "logistics", "campus", "office", "hub", "fleet", "rate", "cost", "p90", "delay",
+            "me", "our", "all");
+
+    private int scoreEntityMatch(String normalisedQuestion, String entity) {
+        if (entity == null || entity.length() < MIN_TOKEN_LENGTH) {
+            return 0;
+        }
+        String needle = matchKey(entity);
+        if (needle.isEmpty()) {
+            return 0;
+        }
+        // Exact whole-phrase match: highest priority
+        if (containsWord(normalisedQuestion, needle)) {
+            return 10000 + needle.length();
+        }
+        // Exact substring match
+        if (normalisedQuestion.contains(needle)) {
+            return 5000 + needle.length();
+        }
+
+        // Token-overlap matching for conversational entities (e.g. "Rohan Travel" -> "Rohan Mikhailov Travel")
+        String[] entityTokens = needle.split("\\s+");
+        Set<String> qWords = Set.of(normalisedQuestion.split("\\s+"));
+
+        int matchedTokens = 0;
+        int matchedLength = 0;
+        boolean hasDistinctiveToken = false;
+
+        for (String token : entityTokens) {
+            if (token.length() < 3) {
+                continue;
+            }
+            if (qWords.contains(token) || containsWord(normalisedQuestion, token)) {
+                matchedTokens++;
+                matchedLength += token.length();
+                if (!COMMON_ENTITY_STOP_WORDS.contains(token)) {
+                    hasDistinctiveToken = true;
+                }
+            }
+        }
+
+        if (hasDistinctiveToken && matchedTokens > 0) {
+            return (matchedTokens * 1000) + matchedLength;
+        }
+        return 0;
+    }
+
     Slice resolveEntity(String metricId, String period, String normalisedQuestion) {
         Optional<MetricDefinition> definition = catalog.find(metricId);
         if (definition.isEmpty()) {
@@ -1118,7 +1171,7 @@ public final class BuiltInChatRouter implements ChatPort {
         }
 
         Slice best = Slice.global();
-        int bestLength = 0;
+        int bestScore = 0;
         for (String grain : definition.get().sliceableGrains()) {
             List<MetricSlice> slices;
             try {
@@ -1132,10 +1185,10 @@ public final class BuiltInChatRouter implements ChatPort {
                 if (entity == null || entity.length() < MIN_TOKEN_LENGTH) {
                     continue;
                 }
-                String needle = entity.toLowerCase(Locale.ROOT);
-                if (normalisedQuestion.contains(needle) && needle.length() > bestLength) {
+                int score = scoreEntityMatch(normalisedQuestion, entity);
+                if (score > bestScore) {
                     best = new Slice(grain, entity);
-                    bestLength = needle.length();
+                    bestScore = score;
                 }
             }
         }
@@ -1206,6 +1259,8 @@ public final class BuiltInChatRouter implements ChatPort {
 
     private static Map<String, String> synonyms() {
         Map<String, String> table = new LinkedHashMap<>();
+        table.put("otp", "ota");
+        table.put("ota", "ota");
         table.put("on-time", "ota");
         table.put("on time", "ota");
         table.put("ontime", "ota");

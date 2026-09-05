@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ElementRef, ViewChild, AfterViewChecked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
@@ -6,410 +6,625 @@ import { GlossaryService } from '../core/glossary.service';
 import type { ChatResponse } from '../core/models';
 import { num, usd } from '../core/format';
 
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  time: string;
+  response?: ChatResponse;
+}
+
 /**
- * Ask-the-data.
+ * Conversational Ask-the-Data Console.
  *
- * The resolved tool call is shown verbatim, in mono, next to every answer. That
- * is the point of this screen: the question is natural language but the answer
- * is not — it is a metric-layer call with a metric id, a grain, an entity and a
- * period, and showing it is what separates a queried figure from a generated
- * one. If the router declines, the vocabulary it *can* answer in is listed so
- * the question can be rephrased rather than merely rejected.
+ * Provides a conversational thread with Ground-Truth Tool Call transparency.
+ * Every answer displays the exact resolved metric-layer tool call, citation bindings,
+ * and execution tier.
  */
 @Component({
   selector: 'mi-chat',
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <section class="panel">
-      <h2>Ask the data</h2>
-      <p class="hint">
-        Questions are resolved against the metric catalog. Anything outside that
-        vocabulary is declined rather than guessed at.
-      </p>
+    <div class="chat-container">
+      <!-- Chat Header -->
+      <div class="chat-top-bar">
+        <div class="chat-agent-info">
+          <div class="agent-avatar">🤖</div>
+          <div>
+            <div class="agent-name">MoveInSync Intelligence Agent</div>
+            <div class="agent-status">
+              <span class="pulse-dot"></span>
+              Connected &middot; Ground-truth metric SQL & LLM translation
+            </div>
+          </div>
+        </div>
+        <button class="btn-clear" (click)="clearChat()" title="Reset conversation">
+          🗑️ Clear
+        </button>
+      </div>
 
-      <form (submit)="ask($event)">
+      <!-- Quick Suggestion Pills -->
+      <div class="suggestions-bar">
+        <span class="sugg-label">Try:</span>
+        <div class="chips-scroll">
+          @for (s of samples; track s) {
+            <button class="sugg-chip" (click)="useSample(s)" [disabled]="loading()">
+              {{ s }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <!-- Message History Thread -->
+      <div class="messages-area" #scrollContainer>
+        @for (m of messages(); track m.id) {
+          <div class="message-row" [class.user-row]="m.role === 'user'" [class.agent-row]="m.role === 'assistant'">
+            @if (m.role === 'assistant') {
+              <div class="msg-avatar">🤖</div>
+            }
+
+            <div class="msg-bubble" [class.user-bubble]="m.role === 'user'" [class.agent-bubble]="m.role === 'assistant'">
+              <div class="msg-header">
+                <span class="msg-author">{{ m.role === 'user' ? 'You' : 'Mobility AI' }}</span>
+                <span class="msg-time">{{ m.time }}</span>
+                @if (m.response?.tier; as tier) {
+                  <span class="tier-pill mono">{{ tier }}</span>
+                }
+              </div>
+
+              <div class="msg-text">{{ m.text }}</div>
+
+              <!-- Tool Call Provenance Box -->
+              @if (m.response?.resolvedCall; as c) {
+                <div class="tool-call-box">
+                  <div class="call-title">⚡ Resolved Tool Call (Deterministic SQL)</div>
+                  <code class="mono call-code"
+                    >{{ c.tool }}(metric="{{ c.metricId }}", dimension="{{ c.dimension }}",
+                    entity="{{ c.entity }}", period="{{ c.period }}")</code
+                  >
+                </div>
+              }
+
+              <!-- Citations -->
+              @if (m.response?.citations?.length) {
+                <div class="citations-box">
+                  <div class="cite-title">Data Citations</div>
+                  <div class="cite-list">
+                    @for (c of m.response!.citations; track c.claim) {
+                      <div class="cite-item">
+                        <span class="cite-text">{{ c.claim }}</span>
+                        @if (c.metricId) {
+                          <span class="cite-metric mono">{{ metricLabel(c.metricId) }}@if (c.entity) { · {{ c.entity }}}</span>
+                        }
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+
+              <!-- Usage Accounting -->
+              @if (m.response?.usage; as u) {
+                <div class="usage-meta num">
+                  <span>{{ num(u.calls) }} call{{ u.calls === 1 ? '' : 's' }}</span>
+                  <span>&middot;</span>
+                  <span>{{ num(u.promptTokens + u.completionTokens) }} tokens</span>
+                  <span>&middot;</span>
+                  <span class="cost-accent">{{ usd(u.estimatedCostUsd) }}</span>
+                </div>
+              }
+
+              <!-- Declined Hint -->
+              @if (m.response?.declined && m.response?.knownMetrics?.length) {
+                <div class="declined-box">
+                  <div class="declined-title">Available metrics:</div>
+                  <div class="known-metrics">
+                    @for (km of m.response!.knownMetrics; track km) {
+                      <span class="km-chip mono" (click)="useSample('What is ' + km + '?')">{{ km }}</span>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+
+            @if (m.role === 'user') {
+              <div class="msg-avatar user-icon">👤</div>
+            }
+          </div>
+        }
+
+        <!-- Loading Bubble -->
+        @if (loading()) {
+          <div class="message-row agent-row">
+            <div class="msg-avatar">🤖</div>
+            <div class="msg-bubble agent-bubble loading-bubble">
+              <span class="dot-typing"></span>
+              <span class="loading-label">Resolving against metric layer & LLM query router…</span>
+            </div>
+          </div>
+        }
+      </div>
+
+      <!-- Chat Input Dock -->
+      <form class="chat-input-dock" (submit)="ask($event)">
         <input
+          #inputBox
           type="text"
           [(ngModel)]="question"
           name="question"
           [disabled]="loading()"
-          placeholder="Why did on-time arrival drop in June?"
+          placeholder="Ask anything (e.g., 'What was OTA for Rohan Travel?', 'Why did cost rise in June?')"
           autocomplete="off" />
-        <button type="submit" class="primary" [disabled]="loading() || !question.trim()">
-          {{ loading() ? 'Asking…' : 'Ask' }}
+        <button type="submit" class="btn-send" [disabled]="loading() || !question.trim()">
+          <span class="send-icon">➤</span>
+          <span>Send</span>
         </button>
       </form>
-
-      <div class="suggestions">
-        @for (s of samples; track s) {
-          <button class="chip" (click)="useSample(s)" [disabled]="loading()">{{ s }}</button>
-        }
-      </div>
-
-      @if (error()) {
-        <p class="error">{{ error() }}</p>
-      }
-    </section>
-
-    @for (turn of turns(); track $index) {
-      <!-- The question is echoed above its own answer. Without it the thread is a column of
-           replies to questions the reader has to remember, which is the failure mode of every
-           analytics chat that treats the answer as the artefact. -->
-      <div class="asked"><span class="asked-q">{{ turn.question }}</span></div>
-
-      @if (turn.response; as r) {
-      <section class="panel" [class.declined]="r.declined">
-        <div class="ans-head">
-          <h2>{{ r.declined ? 'Declined' : 'Answer' }}</h2>
-          <span class="tier mono">{{ r.tier }}</span>
-        </div>
-
-        <p class="answer">{{ r.answer }}</p>
-
-        <!-- The resolved call: small, mono, always visible. -->
-        @if (r.resolvedCall; as c) {
-          <div class="call">
-            <div class="call-h">Resolved tool call</div>
-            <code class="mono"
-              >{{ c.tool }}(metric="{{ c.metricId }}", dimension="{{ c.dimension }}",
-              entity="{{ c.entity }}", period="{{ c.period }}")</code
-            >
-          </div>
-        } @else {
-          <div class="call empty">
-            <div class="call-h">Resolved tool call</div>
-            <code class="mono">— none; the question did not map to a catalog metric</code>
-          </div>
-        }
-
-        @if (r.citations?.length) {
-          <h3>Citations</h3>
-          <ul class="cites">
-            @for (c of r.citations; track c.claim) {
-              <li>
-                <span>{{ c.claim }}</span>
-                @if (c.metricId) {
-                  <span class="cite">{{ metricLabel(c.metricId) }}@if (c.entity) { · {{ c.entity }}}</span>
-                }
-              </li>
-            }
-          </ul>
-        }
-
-        @if (r.usage; as u) {
-          <div class="usage num">
-            <span><b>{{ num(u.calls) }}</b> model call{{ u.calls === 1 ? '' : 's' }}</span>
-            <span><b>{{ num(u.promptTokens) }}</b> prompt tokens</span>
-            <span><b>{{ num(u.completionTokens) }}</b> completion tokens</span>
-            <span class="accent"><b>{{ usd(u.estimatedCostUsd) }}</b> estimated</span>
-          </div>
-        }
-
-        @if (r.declined && r.knownMetrics?.length) {
-          <h3>Vocabulary this endpoint answers in</h3>
-          <div class="known">
-            @for (m of r.knownMetrics; track m) {
-              <span class="chip static mono">{{ m }}</span>
-            }
-          </div>
-        }
-      </section>
-      }
-    }
-
-    @if (loading()) {
-      <div class="asked"><span class="asked-q">{{ question }}</span></div>
-      <section class="panel thinking"><p class="hint">Resolving against the metric catalog…</p></section>
-    }
+    </div>
   `,
   styles: [
     `
       :host {
         display: block;
+        height: calc(100vh - 165px);
+        min-height: 520px;
       }
 
-      /* The asked question, right-aligned above its answer — the one visual cue that says
-         "conversation" rather than "report". Deliberately quiet: the answer is the content. */
-      .asked {
+      .chat-container {
         display: flex;
-        justify-content: flex-end;
-        margin: 18px 0 6px;
-      }
-      .asked-q {
-        max-width: min(680px, 82%);
-        padding: 9px 14px;
-        border-radius: 14px 14px 3px 14px;
-        background: color-mix(in srgb, var(--accent, #4a7dff) 14%, transparent);
-        border: 1px solid color-mix(in srgb, var(--accent, #4a7dff) 26%, transparent);
-        font-size: 14px;
-        line-height: 1.45;
-      }
-
-      .panel.thinking {
-        opacity: 0.72;
-      }
-
-      .panel {
+        flex-direction: column;
+        height: 100%;
         background: var(--surface);
         border: 1px solid var(--line);
         border-radius: var(--radius);
-        padding: 14px 15px;
-        margin-bottom: 14px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
       }
 
-      .panel.declined {
-        border-left: 3px solid var(--warning);
-      }
-
-      h2 {
-        margin: 0;
-        font-size: 13px;
-        font-weight: 650;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
-        color: var(--ink-2);
-      }
-
-      h3 {
-        margin: 15px 0 6px;
-        font-size: 11.5px;
-        font-weight: 650;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--ink-muted);
-      }
-
-      .hint {
-        margin: 4px 0 0;
-        font-size: 12px;
-        color: var(--ink-muted);
-        max-width: 74ch;
-      }
-
-      form {
-        display: flex;
-        gap: 8px;
-        margin-top: 12px;
-      }
-
-      input {
-        flex: 1;
-        min-width: 0;
-        font: inherit;
-        font-size: 13.5px;
-        padding: 9px 12px;
-        border-radius: var(--radius);
-        border: 1px solid var(--line-strong);
-        background: var(--surface-2);
-        color: var(--ink);
-      }
-
-      input:focus {
-        outline: none;
-        border-color: var(--accent);
-      }
-
-      input::placeholder {
-        color: var(--ink-muted);
-      }
-
-      button.primary {
-        background: var(--accent);
-        color: #fff;
-        border: none;
-        border-radius: var(--radius);
-        padding: 9px 20px;
-        font-size: 13px;
-        font-weight: 600;
-        white-space: nowrap;
-      }
-
-      button.primary:hover:not(:disabled) {
-        filter: brightness(1.08);
-      }
-
-      button.primary:disabled {
-        opacity: 0.5;
-      }
-
-      .suggestions {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-        margin-top: 10px;
-      }
-
-      .chip {
-        background: var(--surface-2);
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 4px 11px;
-        font-size: 11.5px;
-        color: var(--ink-muted);
-      }
-
-      .chip:hover:not(:disabled) {
-        border-color: var(--accent-line);
-        color: var(--accent);
-      }
-
-      .chip.static {
-        cursor: default;
-        border-radius: 4px;
-        font-size: 11px;
-      }
-
-      .error {
-        margin: 10px 0 0;
-        color: var(--critical);
-        font-size: 12.5px;
-      }
-
-      .ans-head {
+      /* Top Header */
+      .chat-top-bar {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 12px;
+        padding: 10px 16px;
+        background: var(--surface-2);
+        border-bottom: 1px solid var(--line);
       }
 
-      .tier {
-        font-size: 10.5px;
-        padding: 2px 7px;
-        border-radius: 999px;
+      .chat-agent-info {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .agent-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
         background: var(--surface-sunken);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 17px;
         border: 1px solid var(--line);
-        color: var(--ink-muted);
       }
 
-      .mono {
-        font-family: var(--mono);
-      }
-
-      .answer {
-        margin: 10px 0 0;
-        font-size: 14px;
-        line-height: 1.65;
+      .agent-name {
+        font-size: 13px;
+        font-weight: 650;
         color: var(--ink);
-        max-width: 82ch;
-        white-space: pre-wrap;
       }
 
-      /* The resolved call — small mono, deliberately understated but always there. */
-      .call {
-        margin-top: 14px;
-        padding: 9px 11px;
-        background: var(--surface-sunken);
+      .agent-status {
+        font-size: 11px;
+        color: var(--ink-muted);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .pulse-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--good);
+        display: inline-block;
+      }
+
+      .btn-clear {
+        appearance: none;
+        background: none;
         border: 1px solid var(--line);
-        border-radius: var(--radius);
+        border-radius: 6px;
+        padding: 4px 9px;
+        font-size: 11px;
+        color: var(--ink-muted);
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .btn-clear:hover {
+        background: var(--surface-sunken);
+        color: var(--ink);
+      }
+
+      /* Suggestions bar */
+      .suggestions-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 16px;
+        background: color-mix(in srgb, var(--accent) 3%, var(--surface));
+        border-bottom: 1px solid var(--line);
         overflow-x: auto;
       }
 
-      .call.empty code {
+      .sugg-label {
+        font-size: 11px;
+        font-weight: 650;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+        white-space: nowrap;
+      }
+
+      .chips-scroll {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+      }
+
+      .sugg-chip {
+        appearance: none;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 3px 10px;
+        font-size: 11.5px;
+        color: var(--ink-2);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+      }
+
+      .sugg-chip:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--surface-2);
+      }
+
+      /* Messages area */
+      .messages-area {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        background: var(--surface-sunken);
+      }
+
+      .message-row {
+        display: flex;
+        gap: 10px;
+        max-width: 86%;
+      }
+
+      .user-row {
+        align-self: flex-end;
+        flex-direction: row;
+      }
+
+      .agent-row {
+        align-self: flex-start;
+      }
+
+      .msg-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        flex: none;
+      }
+
+      .user-icon {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+      }
+
+      .msg-bubble {
+        padding: 12px 14px;
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: 13px;
+        line-height: 1.55;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+
+      .user-bubble {
+        background: var(--accent);
+        color: #fff;
+        border-top-right-radius: 2px;
+      }
+
+      .agent-bubble {
+        background: var(--surface);
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-top-left-radius: 2px;
+      }
+
+      .msg-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 10.5px;
+        opacity: 0.85;
+      }
+
+      .user-bubble .msg-header {
+        justify-content: flex-end;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .agent-bubble .msg-header {
         color: var(--ink-muted);
       }
 
-      .call-h {
-        font-size: 10px;
+      .msg-author {
+        font-weight: 650;
+      }
+
+      .tier-pill {
+        font-size: 9.5px;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        padding: 1px 6px;
+        border-radius: 12px;
+        background: var(--surface-sunken);
+        border: 1px solid var(--line);
+        color: var(--accent);
+      }
+
+      .msg-text {
+        white-space: pre-wrap;
+      }
+
+      /* Tool call box */
+      .tool-call-box {
+        margin-top: 4px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+      }
+
+      .call-title {
+        font-size: 10px;
+        font-weight: 650;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
         color: var(--ink-muted);
         margin-bottom: 4px;
       }
 
-      .call code {
-        font-size: 11.5px;
-        color: var(--ink-2);
-        white-space: pre;
+      .call-code {
+        font-size: 11px;
+        color: var(--accent);
         display: block;
+        word-break: break-all;
       }
 
-      .cites {
-        list-style: none;
-        margin: 0;
-        padding: 0;
+      /* Citations */
+      .citations-box {
+        margin-top: 4px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--good) 6%, var(--surface));
+        border: 1px solid color-mix(in srgb, var(--good) 25%, transparent);
+      }
+
+      .cite-title {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--good);
+        margin-bottom: 4px;
+      }
+
+      .cite-list {
         display: flex;
         flex-direction: column;
+        gap: 4px;
+      }
+
+      .cite-item {
+        font-size: 11.5px;
+        color: var(--ink-2);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .cite-metric {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        color: var(--ink-muted);
+      }
+
+      /* Usage meta */
+      .usage-meta {
+        font-size: 10.5px;
+        color: var(--ink-muted);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-top: 2px;
+      }
+
+      .cost-accent {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* Declined */
+      .declined-box {
+        margin-top: 6px;
+        padding: 8px;
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+        border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
+      }
+
+      .declined-title {
+        font-size: 10.5px;
+        font-weight: 650;
+        color: var(--warning);
+        margin-bottom: 5px;
+      }
+
+      .known-metrics {
+        display: flex;
+        flex-wrap: wrap;
         gap: 5px;
       }
 
-      .cites li {
-        display: flex;
-        gap: 9px;
-        align-items: baseline;
-        flex-wrap: wrap;
-        font-size: 12.5px;
-        color: var(--ink-2);
-        padding: 6px 9px;
-        background: var(--surface-2);
-        border-left: 2px solid var(--accent-line);
-        border-radius: 0 4px 4px 0;
-      }
-
-      .cite {
+      .km-chip {
         font-size: 10.5px;
-        color: var(--ink-muted);
-        background: var(--surface-sunken);
-        border: 1px solid var(--line);
-        padding: 1px 5px;
+        padding: 2px 7px;
         border-radius: 4px;
-        white-space: nowrap;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        cursor: pointer;
+        color: var(--ink-2);
       }
 
-      .usage {
-        display: flex;
-        gap: 16px;
-        flex-wrap: wrap;
-        margin-top: 14px;
-        padding-top: 11px;
-        border-top: 1px solid var(--line);
-        font-size: 11.5px;
-        color: var(--ink-muted);
-      }
-
-      .usage b {
-        color: var(--ink);
-        font-weight: 620;
-      }
-
-      .usage .accent b {
+      .km-chip:hover {
+        border-color: var(--accent);
         color: var(--accent);
       }
 
-      .known {
+      /* Loading indicator */
+      .loading-bubble {
         display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        font-size: 12px;
+        color: var(--ink-muted);
+      }
+
+      .dot-typing {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: var(--accent);
+        box-shadow: 12px 0 0 0 var(--accent), 24px 0 0 0 var(--accent);
+        animation: dot-pulse 1.2s infinite ease-in-out;
+        margin-right: 20px;
+      }
+
+      @keyframes dot-pulse {
+        0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+        40% { transform: scale(1); opacity: 1; }
+      }
+
+      /* Input dock */
+      .chat-input-dock {
+        display: flex;
+        gap: 10px;
+        padding: 12px 16px;
+        background: var(--surface);
+        border-top: 1px solid var(--line);
+      }
+
+      .chat-input-dock input {
+        flex: 1;
+        font: inherit;
+        font-size: 13.5px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line-strong);
+        background: var(--surface-2);
+        color: var(--ink);
+        outline: none;
+        transition: border-color 0.15s;
+      }
+
+      .chat-input-dock input:focus {
+        border-color: var(--accent);
+      }
+
+      .btn-send {
+        display: flex;
+        align-items: center;
         gap: 6px;
-        flex-wrap: wrap;
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: none;
+        background: var(--accent);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 650;
+        cursor: pointer;
+        transition: filter 0.15s;
+      }
+
+      .btn-send:hover:not(:disabled) {
+        filter: brightness(1.1);
+      }
+
+      .btn-send:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      .send-icon {
+        font-size: 12px;
       }
     `,
   ],
 })
-export class ChatComponent implements OnInit {
+export class ChatComponent implements OnInit, AfterViewChecked {
   private readonly api = inject(ApiService);
   private readonly glossary = inject(GlossaryService);
 
+  @ViewChild('scrollContainer') private scrollContainer?: ElementRef;
+  @ViewChild('inputBox') private inputBox?: ElementRef;
+
   question = '';
-  /**
-   * The conversation so far, oldest first.
-   *
-   * Previously one `response` signal, replaced on every ask — so the screen showed a single answer
-   * and the question that produced it was already gone from the input. That is a query box, not a
-   * conversation: a reader could not compare July against June without re-reading two screens, and
-   * the natural next move after any answer is to ask something adjacent to it.
-   *
-   * Keeping the turns is also what makes the resolved tool call worth showing. One call in isolation
-   * is a curiosity; a column of them beside a column of answers is the claim this screen exists to
-   * make — that every reply came from a metric-layer call, visibly, every time.
-   */
-  readonly turns = signal<{ question: string; response: ChatResponse }[]>([]);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
 
+  readonly messages = signal<ChatMessage[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      text: 'Hello! I am your MoveInSync mobility analytics agent. Ask any question about fleet performance, on-time arrivals, cost, no-shows, driver/cab compliance, or specific vendors.',
+      time: 'Just now',
+    },
+  ]);
+
   readonly samples = [
     'Why did on-time arrival drop in June?',
-    'What is the cost per trip for June 2026?',
+    'What was the cost per trip in July 2026?',
     'Which office had the worst OTA in June?',
-    'What is the no-show rate?',
+    'What is the no-show rate for July?',
+    'Tell me about Rohan Mikhailov Travel',
+    'What is the vehicle cab non-compliance rate?',
   ];
 
   readonly num = num;
@@ -417,6 +632,18 @@ export class ChatComponent implements OnInit {
 
   ngOnInit(): void {
     void this.glossary.load();
+  }
+
+  ngAfterViewChecked(): void {
+    this.scrollToBottom();
+  }
+
+  private scrollToBottom(): void {
+    if (this.scrollContainer) {
+      try {
+        this.scrollContainer.nativeElement.scrollTop = this.scrollContainer.nativeElement.scrollHeight;
+      } catch {}
+    }
   }
 
   metricLabel(id: string | null | undefined): string {
@@ -433,24 +660,61 @@ export class ChatComponent implements OnInit {
     void this.send();
   }
 
+  clearChat(): void {
+    this.messages.set([
+      {
+        id: 'reset',
+        role: 'assistant',
+        text: 'Chat history cleared. How can I help you analyze the fleet data?',
+        time: 'Just now',
+      },
+    ]);
+  }
+
   private async send(): Promise<void> {
     const q = this.question.trim();
     if (!q || this.loading()) return;
 
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: ChatMessage = {
+      id: 'user-' + Date.now(),
+      role: 'user',
+      text: q,
+      time: timeStr,
+    };
+
+    this.messages.update((msgs) => [...msgs, userMsg]);
+    this.question = '';
     this.loading.set(true);
     this.error.set(null);
+
     try {
-      const prior = this.turns();
-      const previousQuestion = prior.length ? prior[prior.length - 1].question : undefined;
-      const response = await this.api.chat(q, undefined, previousQuestion);
-      this.turns.update((t) => [...t, { question: q, response }]);
-      // The box empties on success only. A failed ask leaves the text where it was so the question
-      // can be retried or edited rather than retyped.
-      this.question = '';
+      const priorUserMsgs = this.messages().slice(0, -1).filter((m) => m.role === 'user');
+      const previousQuestion = priorUserMsgs.length ? priorUserMsgs[priorUserMsgs.length - 1].text : undefined;
+      const res = await this.api.chat(q, undefined, previousQuestion);
+      const agentMsg: ChatMessage = {
+        id: 'agent-' + Date.now(),
+        role: 'assistant',
+        text: res.answer,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        response: res,
+      };
+      this.messages.update((msgs) => [...msgs, agentMsg]);
     } catch (e) {
-      this.error.set(e instanceof Error ? e.message : String(e));
+      const errMsg = e instanceof Error ? e.message : String(e);
+      this.error.set(errMsg);
+      this.messages.update((msgs) => [
+        ...msgs,
+        {
+          id: 'err-' + Date.now(),
+          role: 'assistant',
+          text: 'Error connecting to analytics service: ' + errMsg,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
     } finally {
       this.loading.set(false);
+      setTimeout(() => this.inputBox?.nativeElement.focus(), 50);
     }
   }
 }

@@ -101,6 +101,8 @@ public class LlmChatAgent implements ChatPort {
     private final MetricCatalog catalog;
     private final MetricQueryService metrics;
     private final BenchmarkService benchmarks;
+    private final AttributionService attribution;
+    private final IncidentStore incidents;
     private final MetricFormat format;
     private final StandingOutlierScanner standing;
     private final BuiltInChatRouter deterministic;
@@ -121,7 +123,9 @@ public class LlmChatAgent implements ChatPort {
         this.catalog = catalog;
         this.metrics = metrics;
         this.benchmarks = benchmarks;
+        this.attribution = attribution;
         this.format = format;
+        this.incidents = incidents;
         this.standing = standing;
         // Owns its own deterministic router rather than asking the container for one: PortRegistry
         // constructs BuiltInChatRouter inline, so there is no bean to inject, and a second instance
@@ -277,11 +281,15 @@ public class LlmChatAgent implements ChatPort {
                 case "list_entities" -> listEntities(metricId, dimension, period, allowedValues, allowedLiterals);
                 case "observe" -> observe(metricId, dimension, entity, period,
                         allowedValues, allowedLiterals, citations);
+                case "profile" -> profile(dimension, entity, period,
+                        allowedValues, allowedLiterals, citations);
+                case "attribute" -> attribute(metricId, dimension, period,
+                        allowedValues, allowedLiterals, citations);
                 case "rank" -> rank(metricId, dimension, period,
                         allowedValues, allowedLiterals, citations);
                 case "standing_outliers" -> standingOutliers(period, allowedValues, allowedLiterals, citations);
-                default -> "ERROR: no such tool. Available: list_metrics, list_entities, observe, "
-                        + "rank, standing_outliers.";
+                default -> "ERROR: no such tool. Available: list_metrics, list_entities, observe, profile, "
+                        + "attribute, rank, standing_outliers.";
             };
         } catch (RuntimeException e) {
             log.debug("Tool {} failed: {}", tool, e.toString());
@@ -330,12 +338,41 @@ public class LlmChatAgent implements ChatPort {
         return out.toString();
     }
 
+    private String resolveEntityFuzzy(String metricId, String dimension, String candidate, String period) {
+        if (candidate == null || candidate.isBlank() || dimension == null) {
+            return candidate;
+        }
+        String cleanCand = candidate.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+        List<MetricSlice> slices;
+        try {
+            slices = metrics.slices(metricId, dimension, period);
+        } catch (RuntimeException e) {
+            return candidate;
+        }
+        for (MetricSlice s : slices) {
+            if (s.entity() == null) continue;
+            String cleanEnt = s.entity().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+            if (cleanEnt.equals(cleanCand) || cleanEnt.contains(cleanCand)) {
+                return s.entity();
+            }
+            for (String tok : cleanCand.split("\\s+")) {
+                if (tok.length() >= 4 && cleanEnt.contains(tok)) {
+                    return s.entity();
+                }
+            }
+        }
+        return candidate;
+    }
+
     private String observe(
             String metricId, String dimension, String entity, String period,
             Set<Double> allowedValues, Set<String> allowedLiterals, List<Evidence> citations) {
 
         if (metricId == null) {
             return "ERROR: observe needs a metric.";
+        }
+        if (dimension != null && entity != null && !entity.equalsIgnoreCase("ALL")) {
+            entity = resolveEntityFuzzy(metricId, dimension, entity, period);
         }
         var observation = benchmarks.observe(
                 metricId,
@@ -355,6 +392,183 @@ public class LlmChatAgent implements ChatPort {
         allowedValues.add((double) observation.sampleSize());
         citations.add(new Evidence(rendered, metricId, entity == null ? "ALL" : entity));
         return rendered;
+    }
+
+    private String profile(
+            String dimension, String entity, String period,
+            Set<Double> allowedValues, Set<String> allowedLiterals, List<Evidence> citations) {
+        if (entity == null || entity.isBlank()) {
+            return "ERROR: profile needs an entity.";
+        }
+
+        String resolvedDimension = dimension;
+        String resolvedEntity = entity;
+        String cleanCand = entity.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+
+        if (resolvedDimension == null || resolvedDimension.isBlank()) {
+            for (MetricDefinition d : catalog.all()) {
+                for (String grain : d.sliceableGrains()) {
+                    List<MetricSlice> slices;
+                    try {
+                        slices = metrics.slices(d.id(), grain, period);
+                    } catch (RuntimeException e) {
+                        continue;
+                    }
+                    for (MetricSlice s : slices) {
+                        if (s.entity() == null) continue;
+                        String cleanEnt = s.entity().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+                        if (cleanEnt.contains(cleanCand)) {
+                            resolvedDimension = grain;
+                            resolvedEntity = s.entity();
+                            break;
+                        }
+                        for (String tok : cleanCand.split("\\s+")) {
+                            if (tok.length() >= 4 && cleanEnt.contains(tok)) {
+                                resolvedDimension = grain;
+                                resolvedEntity = s.entity();
+                                break;
+                            }
+                        }
+                        if (resolvedDimension != null) break;
+                    }
+                    if (resolvedDimension != null) break;
+                }
+                if (resolvedDimension != null) break;
+            }
+        } else {
+            for (MetricDefinition d : catalog.all()) {
+                if (d.supports(resolvedDimension)) {
+                    List<MetricSlice> slices = metrics.slices(d.id(), resolvedDimension, period);
+                    for (MetricSlice s : slices) {
+                        if (s.entity() == null) continue;
+                        String cleanEnt = s.entity().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+                        if (cleanEnt.contains(cleanCand)) {
+                            resolvedEntity = s.entity();
+                            break;
+                        }
+                        for (String tok : cleanCand.split("\\s+")) {
+                            if (tok.length() >= 4 && cleanEnt.contains(tok)) {
+                                resolvedEntity = s.entity();
+                                break;
+                            }
+                        }
+                        if (!resolvedEntity.equals(entity)) break;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (resolvedDimension == null) {
+            resolvedDimension = "vendor";
+        }
+
+        StringBuilder out = new StringBuilder();
+        out.append("Profile for ").append(resolvedDimension).append(" ").append(resolvedEntity)
+                .append(" in ").append(period).append(":\n");
+        allowedLiterals.add(resolvedEntity);
+        if (period != null) {
+            allowedLiterals.add(period);
+        }
+
+        for (MetricDefinition d : catalog.all()) {
+            if (!d.supports(resolvedDimension)) {
+                continue;
+            }
+            List<MetricSlice> cohort = metrics.slices(d.id(), resolvedDimension, period).stream()
+                    .filter(MetricSlice::measured)
+                    .toList();
+            String finalEnt = resolvedEntity;
+            MetricSlice mine = cohort.stream()
+                    .filter(s -> finalEnt.equalsIgnoreCase(s.entity()))
+                    .findFirst()
+                    .orElse(null);
+            if (mine == null || mine.value() == null) {
+                continue;
+            }
+            boolean higherIsBetter = d.higherIsBetter();
+            List<MetricSlice> ordered = cohort.stream()
+                    .sorted(higherIsBetter
+                            ? java.util.Comparator.comparingDouble((MetricSlice s) -> s.value()).reversed()
+                            : java.util.Comparator.comparingDouble(MetricSlice::value))
+                    .toList();
+            int rank = ordered.indexOf(mine) + 1;
+            double med = median(ordered);
+
+            record(allowedValues, allowedLiterals, mine.value(), period, resolvedEntity);
+            record(allowedValues, allowedLiterals, med, null, null);
+            allowedValues.add((double) rank);
+            allowedValues.add((double) ordered.size());
+
+            String line = "%s: %s (rank %d of %d, cohort median %s)".formatted(
+                    d.label(),
+                    format.value(d.id(), mine.value()),
+                    rank,
+                    ordered.size(),
+                    format.value(d.id(), med));
+            out.append("• ").append(line).append('\n');
+            citations.add(new Evidence(line, d.id(), resolvedEntity));
+        }
+        return out.toString();
+    }
+
+    private static double median(List<MetricSlice> ordered) {
+        if (ordered.isEmpty()) {
+            return 0.0;
+        }
+        int n = ordered.size();
+        if (n % 2 == 1) {
+            return ordered.get(n / 2).value();
+        }
+        return (ordered.get(n / 2 - 1).value() + ordered.get(n / 2).value()) / 2.0;
+    }
+
+    private String attribute(
+            String metricId, String dimension, String period,
+            Set<Double> allowedValues, Set<String> allowedLiterals, List<Evidence> citations) {
+        if (metricId == null) {
+            return "ERROR: attribute needs a metric.";
+        }
+        List<String> available = metrics.periods(metricId);
+        if (available.isEmpty()) {
+            return "no data for metric " + metricId;
+        }
+        String targetPeriod = period == null ? available.get(available.size() - 1) : period;
+        int idx = available.indexOf(targetPeriod);
+        String priorPeriod = idx > 0 ? available.get(idx - 1) : null;
+        if (priorPeriod == null) {
+            return "no prior period to compare against for " + targetPeriod;
+        }
+
+        var result = attribution.attribute(metricId, targetPeriod, priorPeriod);
+        if (result == null || result.ranked().isEmpty()) {
+            return "no significant movement to attribute for " + metricId + " in " + targetPeriod;
+        }
+        var top = result.winner().orElse(result.ranked().get(0));
+        StringBuilder out = new StringBuilder();
+        out.append(format.label(metricId)).append(" moved by ")
+                .append(format.effect(metricId, result.actualDelta()))
+                .append(" from ").append(priorPeriod).append(" to ").append(targetPeriod)
+                .append(". Top explaining dimension is ").append(top.dimension()).append(":\n");
+
+        allowedValues.add(Math.abs(result.actualDelta()));
+        allowedLiterals.add(priorPeriod);
+        allowedLiterals.add(targetPeriod);
+
+        for (var c : top.contributions().stream().limit(5).toList()) {
+            allowedValues.add(Math.abs(c.total()));
+            allowedValues.add(Math.abs(c.rateEffect()));
+            allowedValues.add(Math.abs(c.mixEffect()));
+            allowedLiterals.add(c.entity());
+            String line = "• %s: total impact %s (rate %s, mix %s)".formatted(
+                    c.entity(),
+                    format.effect(metricId, c.total()),
+                    format.effect(metricId, c.rateEffect()),
+                    format.effect(metricId, c.mixEffect()));
+            out.append(line).append('\n');
+            citations.add(new Evidence(line, metricId, c.entity()));
+        }
+        return out.toString();
     }
 
     private String rank(
@@ -452,6 +666,8 @@ public class LlmChatAgent implements ChatPort {
                   list_metrics   {}                                       what can be measured
                   list_entities  {metric, dimension, period}              what exists on a dimension
                   observe        {metric, dimension?, entity?, period?}   one value, with its trips
+                  profile        {entity, dimension?, period?}            full profile across all metrics for an entity
+                  attribute      {metric, dimension, period?}             why a metric moved across a dimension
                   rank           {metric, dimension, period}              ordered best to worst
                   standing_outliers {period}                              persistently poor segments
 
