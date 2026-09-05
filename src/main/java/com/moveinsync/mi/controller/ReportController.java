@@ -25,9 +25,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The period brief: every open incident and the headline metrics, written for one reader.
@@ -53,6 +56,7 @@ public class ReportController {
     private final BenchmarkService benchmarks;
     private final MetricFormat format;
     private final OperatorCopy copy;
+    private final Map<String, Brief> briefCache = new ConcurrentHashMap<>();
 
     public ReportController(
             PortRegistry ports,
@@ -93,7 +97,7 @@ public class ReportController {
     }
 
     /**
-     * Renders the brief.
+     * Renders the brief, serving from in-memory cache when incidents and period match.
      *
      * @param period  {@code yyyy-MM}; defaults to the latest period with data
      * @param persona one of {@link NarrativePort#PERSONAS}; anything else falls back to the transport
@@ -104,7 +108,8 @@ public class ReportController {
     public ResponseEntity<?> brief(
             @RequestParam(required = false) String period,
             @RequestParam(required = false, defaultValue = NarrativePort.TRANSPORT_MANAGER) String persona,
-            @RequestParam(name = "format", required = false, defaultValue = "json") String responseFormat) {
+            @RequestParam(name = "format", required = false, defaultValue = "json") String responseFormat,
+            @RequestParam(name = "refresh", required = false, defaultValue = "false") boolean refresh) {
 
         String resolvedPeriod = resolvePeriod(period);
         String reader = canonicalPersona(persona);
@@ -114,25 +119,72 @@ public class ReportController {
                 .sorted(Comparator.comparingInt(Incident::priority)
                         .thenComparing(Incident::id))
                 .toList();
-        List<String> headline = headlineMetrics(resolvedPeriod);
+        List<String> openIds = open.stream().map(Incident::id).toList();
+        String cacheKey = resolvedPeriod + ":" + reader;
 
+        if (!refresh) {
+            Brief cached = briefCache.get(cacheKey);
+            if (cached != null && cached.incidentIds().equals(openIds) && !cached.markdown().isBlank()) {
+                log.info("Serving cached brief for {} on {} (tier {})", reader, resolvedPeriod, cached.tier());
+                if ("markdown".equalsIgnoreCase(responseFormat) || "md".equalsIgnoreCase(responseFormat)) {
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.valueOf("text/markdown;charset=UTF-8"))
+                            .body(cached.markdown());
+                }
+                return ResponseEntity.ok(cached);
+            }
+        }
+
+        List<String> headline = headlineMetrics(resolvedPeriod);
         String markdown = ports.narrative().brief(resolvedPeriod, reader, open, headline);
         log.info("Brief rendered for {} on {} ({} incidents, tier {})",
                 reader, resolvedPeriod, open.size(), ports.narrative().tier());
+
+        Brief brief = new Brief(
+                resolvedPeriod,
+                reader,
+                markdown,
+                headline,
+                openIds,
+                ports.narrative().tier(),
+                Instant.now().toString());
+        briefCache.put(cacheKey, brief);
 
         if ("markdown".equalsIgnoreCase(responseFormat) || "md".equalsIgnoreCase(responseFormat)) {
             return ResponseEntity.ok()
                     .contentType(MediaType.valueOf("text/markdown;charset=UTF-8"))
                     .body(markdown);
         }
-        return ResponseEntity.ok(new Brief(
-                resolvedPeriod,
-                reader,
-                markdown,
-                headline,
-                open.stream().map(Incident::id).toList(),
-                ports.narrative().tier(),
-                Instant.now().toString()));
+        return ResponseEntity.ok(brief);
+    }
+
+    /**
+     * Precompute and warm the cache for all registered personas for the period.
+     */
+    @PostMapping("/brief/precompute")
+    public ResponseEntity<Map<String, Object>> precompute(
+            @RequestParam(required = false) String period) {
+        String resolvedPeriod = resolvePeriod(period);
+        List<Incident> open = copy.incidents(incidents.openIncidents()).stream()
+                .sorted(Comparator.comparingInt(Incident::priority)
+                        .thenComparing(Incident::id))
+                .toList();
+        List<String> headline = headlineMetrics(resolvedPeriod);
+        List<String> openIds = open.stream().map(Incident::id).toList();
+
+        Map<String, String> results = new java.util.LinkedHashMap<>();
+        for (String persona : NarrativePort.PERSONAS) {
+            String cacheKey = resolvedPeriod + ":" + persona;
+            String md = ports.narrative().brief(resolvedPeriod, persona, open, headline);
+            Brief b = new Brief(resolvedPeriod, persona, md, headline, openIds, ports.narrative().tier(), Instant.now().toString());
+            briefCache.put(cacheKey, b);
+            results.put(persona, b.tier());
+        }
+        return ResponseEntity.ok(Map.of(
+                "period", resolvedPeriod,
+                "precomputedPersonas", results,
+                "cachedCount", briefCache.size()
+        ));
     }
 
     /** The personas the platform renders for, in presentation order. */

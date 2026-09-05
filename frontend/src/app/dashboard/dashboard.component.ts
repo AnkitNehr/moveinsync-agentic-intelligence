@@ -552,6 +552,20 @@ interface ChartPoint {
                   (click)="setDimension('business_unit')">
                   Business Unit
                 </button>
+                <button
+                  type="button"
+                  class="btn-toggle"
+                  [class.active]="selectedDimension() === 'shift_type'"
+                  (click)="setDimension('shift_type')">
+                  Shift
+                </button>
+                <button
+                  type="button"
+                  class="btn-toggle"
+                  [class.active]="selectedDimension() === 'route_source'"
+                  (click)="setDimension('route_source')">
+                  Route Mode
+                </button>
               </div>
             </div>
 
@@ -1996,6 +2010,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     { id: 'noshow_rate', label: 'No-Show Rate', unit: 'rate', higherIsBetter: false },
     { id: 'cost_per_km', label: 'Cost per Km', unit: 'currency', higherIsBetter: false },
     { id: 'delay_p90', label: 'P90 Delay', unit: 'minutes', higherIsBetter: false },
+    { id: 'driver_noncompliance', label: 'Driver Conduct', unit: 'rate', higherIsBetter: false },
+    { id: 'cab_noncompliance', label: 'Cab Compliance', unit: 'rate', higherIsBetter: false },
   ];
 
   // Default industry benchmarks (from domain knowledge or config)
@@ -2006,6 +2022,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     noshow_rate: 0.06,
     cost_per_km: 75.0,
     delay_p90: 12.0,
+    driver_noncompliance: 0.0015,
+    cab_noncompliance: 0.0015,
   };
 
   // Arbitrary benchmarks configurable in the UI
@@ -2016,6 +2034,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     noshow_rate: 0.06,
     cost_per_km: 75.0,
     delay_p90: 12.0,
+    driver_noncompliance: 0.0015,
+    cab_noncompliance: 0.0015,
   });
 
   readonly kpis = signal<Kpi[]>([
@@ -2360,6 +2380,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
       noshow_rate:  [0.0944,  0.0807,  0.0581],
       cost_per_km:  [86.60,   80.24,   78.51],
       delay_p90:    [9.8,     14.2,    8.4],
+      driver_noncompliance: [0.00156, 0.00108, 0.00121],
+      cab_noncompliance:    [0.00114, 0.00092, 0.00103],
     };
 
     // --- Weekly cached data (5 representative weeks: May-W3 … Jul-W3)
@@ -2407,6 +2429,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
         { label: 'Jun W3', value: 15.2 },
         { label: 'Jul W1', value: 10.8 },
         { label: 'Jul W3', value: 7.6 },
+      ],
+      driver_noncompliance: [
+        { label: 'May W3', value: 0.0016 },
+        { label: 'Jun W1', value: 0.0013 },
+        { label: 'Jun W3', value: 0.0011 },
+        { label: 'Jul W1', value: 0.0011 },
+        { label: 'Jul W3', value: 0.0012 },
+      ],
+      cab_noncompliance: [
+        { label: 'May W3', value: 0.0012 },
+        { label: 'Jun W1', value: 0.0010 },
+        { label: 'Jun W3', value: 0.0009 },
+        { label: 'Jul W1', value: 0.0010 },
+        { label: 'Jul W3', value: 0.0010 },
       ],
     };
 
