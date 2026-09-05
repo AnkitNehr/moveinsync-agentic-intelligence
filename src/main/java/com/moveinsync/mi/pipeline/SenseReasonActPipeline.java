@@ -23,6 +23,7 @@ import com.moveinsync.mi.model.Finding;
 import com.moveinsync.mi.model.Incident;
 import com.moveinsync.mi.model.PolicyDecision;
 import com.moveinsync.mi.model.Quality;
+import com.moveinsync.mi.model.RunProgress;
 import com.moveinsync.mi.model.RunSummary;
 import com.moveinsync.mi.pipeline.spi.NarrativePort;
 import com.moveinsync.mi.pipeline.spi.ReasoningPort;
@@ -32,7 +33,6 @@ import com.moveinsync.mi.policy.SlaPolicy;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -135,6 +135,7 @@ public class SenseReasonActPipeline {
 
     private final AtomicReference<RunSummary> latestSummary = new AtomicReference<>();
     private final AtomicReference<List<Incident>> latestIncidents = new AtomicReference<>(List.of());
+    private final RunProgressTracker progressTracker = new RunProgressTracker();
 
     public SenseReasonActPipeline(
             DuckDbService duckDb,
@@ -220,6 +221,29 @@ public class SenseReasonActPipeline {
     }
 
     /**
+     * Live funnel snapshot. {@code running} follows the pipeline lock so a poller sees the run as
+     * in-flight until {@link #run} returns, even after the last stage has already finished.
+     */
+    public RunProgress progress() {
+        RunProgress snap = progressTracker.snapshot();
+        boolean locked = runLock.isLocked();
+        if (snap.running() == locked) {
+            return snap;
+        }
+        return new RunProgress(
+                locked,
+                snap.runId(),
+                snap.startedAt(),
+                snap.currentStage(),
+                snap.completed(),
+                snap.trips(),
+                snap.seriesEvaluated(),
+                snap.findings(),
+                snap.candidates(),
+                snap.incidents());
+    }
+
+    /**
      * The most recent period the fact store holds data for.
      *
      * <p>Resolved from the catalog rather than from a constant, so the platform follows the data
@@ -276,12 +300,28 @@ public class SenseReasonActPipeline {
         usage.beginRun(runId);
         RunLedger ledger = new RunLedger();
         long wallStart = System.nanoTime();
+        progressTracker.begin(runId, startedAt);
 
         log.info("Run {} starting: {} vs {} (ports: {})", runId, period, priorPeriod, ports.tiers());
+        try {
+            return executeBody(period, priorPeriod, runId, startedAt, ledger, wallStart);
+        } finally {
+            progressTracker.finish();
+        }
+    }
+
+    private RunSummary executeBody(
+            String period,
+            String priorPeriod,
+            String runId,
+            Instant startedAt,
+            RunLedger ledger,
+            long wallStart) {
 
         // ---- 1. ingest quality ---------------------------------------------------------------------
         IngestReport ingest = ledger.time(STAGE_INGEST, this::ingestReport);
         long trips = ledger.time(STAGE_INGEST, this::tripCount);
+        progressTracker.trips(trips);
         auditLog.recordDeterministic(runId, AuditLog.STAGE_INGEST, List.of(
                 "trips=" + trips,
                 "rowsRead=" + ingest.rowsRead(),
@@ -291,12 +331,15 @@ public class SenseReasonActPipeline {
         // ---- 2. scan -------------------------------------------------------------------------------
         List<Finding> raw = ledger.time(STAGE_SCAN, () -> scanner.scan(period, priorPeriod));
         int seriesEvaluated = ledger.time(STAGE_SCAN, () -> countSeries(period));
+        progressTracker.findings(raw.size());
+        progressTracker.seriesEvaluated(seriesEvaluated);
         auditLog.recordDeterministic(runId, AuditLog.STAGE_SCAN,
                 raw.stream().map(Finding::id).toList());
 
         // ---- 3. rank -------------------------------------------------------------------------------
         RankingContext context = ledger.time(STAGE_RANK, () -> memoryContext(raw, period));
         List<Finding> ranked = ledger.time(STAGE_RANK, () -> ranker.rank(raw, context));
+        progressTracker.candidates(ranked.size());
         Map<String, Finding> byId = new LinkedHashMap<>();
         ranked.forEach(finding -> byId.put(finding.id(), finding));
 
@@ -372,7 +415,9 @@ public class SenseReasonActPipeline {
                     ports.narrative().tier(),
                     0L, 0L);
             opened.add(finished);
+            progressTracker.incidents(opened.size());
         }
+        progressTracker.incidents(opened.size());
 
         // ---- 10. audit -----------------------------------------------------------------------------
         // Written before the summary is assembled so that the audit stage's own cost appears in the
@@ -750,17 +795,20 @@ public class SenseReasonActPipeline {
         private final Map<String, long[]> tokens = new LinkedHashMap<>();
 
         <T> T time(String stage, Supplier<T> work) {
+            progressTracker.enter(stage);
             UsageRecorder.Snapshot before = usage.snapshot();
             long started = System.nanoTime();
             try {
                 return work.get();
             } finally {
-                millis.merge(stage, (System.nanoTime() - started) / 1_000_000L, Long::sum);
+                long elapsed = (System.nanoTime() - started) / 1_000_000L;
+                millis.merge(stage, elapsed, Long::sum);
                 UsageRecorder.Snapshot after = usage.snapshot();
                 long[] delta = {
                         Math.max(0L, after.promptTokens() - before.promptTokens()),
                         Math.max(0L, after.completionTokens() - before.completionTokens())};
                 tokens.merge(stage, delta, (a, b) -> new long[] {a[0] + b[0], a[1] + b[1]});
+                progressTracker.complete(stage, elapsed, delta[0], delta[1]);
             }
         }
 
@@ -776,7 +824,6 @@ public class SenseReasonActPipeline {
 
         List<String> timings() {
             return millis.entrySet().stream()
-                    .sorted(Comparator.comparing(Map.Entry::getKey))
                     .map(entry -> entry.getKey() + "=" + entry.getValue() + "ms")
                     .toList();
         }

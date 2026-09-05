@@ -3,13 +3,14 @@ import {
   EventEmitter,
   Output,
   OnInit,
+  OnDestroy,
   inject,
   signal,
   computed,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ApiService, HttpError } from '../core/api.service';
-import type { Health, Incident, MetricObservation, RunSummary } from '../core/models';
+import type { Health, Incident, MetricObservation, RunProgress, RunSummary } from '../core/models';
 import {
   byUnit,
   compact,
@@ -21,6 +22,48 @@ import {
   usd,
   ms,
 } from '../core/format';
+
+interface FunnelBandDef {
+  id: string;
+  label: string;
+  hint: string;
+  stages: string[];
+}
+
+const FUNNEL_BANDS: FunnelBandDef[] = [
+  {
+    id: 'sense',
+    label: 'Sense',
+    hint: 'Deterministic Java — ingest through policy',
+    stages: ['ingest', 'scan', 'rank', 'policy'],
+  },
+  {
+    id: 'reason',
+    label: 'Reason',
+    hint: 'First model call. It never sees a trip row.',
+    stages: ['triage', 'reason', 'narrate'],
+  },
+  {
+    id: 'act',
+    label: 'Act',
+    hint: 'Policy then outbox. No LLM.',
+    stages: ['actionGuard', 'persist'],
+  },
+];
+
+const STAGE_LABELS: Record<string, string> = {
+  ingest: 'Ingest',
+  scan: 'Scan',
+  rank: 'Rank',
+  policy: 'Policy',
+  triage: 'Triage',
+  reason: 'Reason',
+  narrate: 'Narrate',
+  actionGuard: 'Guard',
+  persist: 'Persist',
+};
+
+const LLM_STAGES = new Set(['triage', 'reason', 'narrate']);
 
 interface Kpi {
   id: string;
@@ -115,6 +158,31 @@ interface Kpi {
         <p class="error">{{ runError() }}</p>
       }
 
+      <div class="funnel" aria-label="Pipeline funnel">
+        @for (band of funnel(); track band.id) {
+          <div class="band" [attr.data-band]="band.id">
+            <div class="band-head">
+              <span class="band-label">{{ band.label }}</span>
+              <span class="band-hint">{{ band.hint }}</span>
+            </div>
+            <ol class="steps">
+              @for (step of band.steps; track step.id) {
+                <li class="step" [class.current]="step.status === 'current'" [class.done]="step.status === 'done'">
+                  <span class="step-name">{{ step.label }}</span>
+                  <span class="step-engine">{{ step.engine }}</span>
+                  @if (step.count) {
+                    <span class="step-count num">{{ step.count }}</span>
+                  }
+                  @if (step.ms) {
+                    <span class="step-ms num">{{ step.ms }}</span>
+                  }
+                </li>
+              }
+            </ol>
+          </div>
+        }
+      </div>
+
       @if (summary(); as s) {
         <div class="telemetry">
           <div class="tel"><span>Run</span><b class="mono">{{ s.runId }}</b></div>
@@ -127,15 +195,7 @@ interface Kpi {
           <div class="tel accent"><span>Estimated cost</span><b class="num">{{ usd(s.estimatedCostUsd) }}</b></div>
           <div class="tel accent"><span>Wall clock</span><b class="num">{{ ms(s.wallClockMs) }}</b></div>
         </div>
-
-        @if (s.stageTimings?.length) {
-          <div class="stages scroll-x">
-            @for (st of s.stageTimings; track st) {
-              <span class="stage mono">{{ st }}</span>
-            }
-          </div>
-        }
-      } @else if (!running()) {
+      } @else if (!running() && !progress()?.running) {
         <p class="hint idle">
           No run has completed since startup. Press <b>Run now</b> to execute one.
         </p>
@@ -415,21 +475,102 @@ interface Kpi {
         font-size: 11.5px !important;
       }
 
-      .stages {
-        display: flex;
-        gap: 6px;
-        margin-top: 9px;
-        padding-bottom: 3px;
+      .funnel {
+        display: grid;
+        grid-template-columns: 1.4fr 1.1fr 0.8fr;
+        gap: 10px;
+        margin-top: 13px;
       }
 
-      .stage {
-        flex: none;
-        padding: 3px 8px;
-        border-radius: 4px;
-        background: var(--surface-sunken);
+      @media (max-width: 900px) {
+        .funnel {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .band {
         border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface-2);
+        padding: 8px 9px 9px;
+        min-width: 0;
+      }
+
+      .band-head {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        margin-bottom: 7px;
+      }
+
+      .band-label {
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-2);
+      }
+
+      .band-hint {
+        font-size: 11px;
         color: var(--ink-muted);
+        line-height: 1.35;
+      }
+
+      .steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .step {
+        flex: 1 1 72px;
+        min-width: 72px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        padding: 6px 7px;
+        border-radius: 5px;
+        border: 1px solid var(--line);
+        background: var(--surface-sunken);
+        color: var(--ink-muted);
+      }
+
+      .step.done {
+        color: var(--ink);
+        border-color: color-mix(in srgb, var(--good) 45%, var(--line));
+        background: color-mix(in srgb, var(--good) 8%, var(--surface));
+      }
+
+      .step.current {
+        color: var(--ink);
+        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+      }
+
+      .step-name {
+        font-size: 12px;
+        font-weight: 620;
+      }
+
+      .step-engine {
+        font-size: 10px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .step-count,
+      .step-ms {
+        font-size: 11px;
+        color: var(--ink-2);
       }
 
       /* ---- incident list ---- */
@@ -544,7 +685,7 @@ interface Kpi {
     `,
   ],
 })
-export class DashboardComponent implements OnInit {
+export class DashboardComponent implements OnInit, OnDestroy {
   private readonly api = inject(ApiService);
 
   @Output() openIncident = new EventEmitter<string>();
@@ -552,6 +693,7 @@ export class DashboardComponent implements OnInit {
 
   readonly health = signal<Health | null>(null);
   readonly summary = signal<RunSummary | null>(null);
+  readonly progress = signal<RunProgress | null>(null);
   readonly incidents = signal<Incident[]>([]);
   readonly running = signal(false);
   readonly loadingIncidents = signal(false);
@@ -574,6 +716,34 @@ export class DashboardComponent implements OnInit {
     return Math.max(0, s.candidates - s.incidents);
   });
 
+  readonly funnel = computed(() => {
+    const p = this.progress();
+    const h = this.health();
+    const completed = new Map((p?.completed ?? []).map((s) => [s.stage, s]));
+    const current = p?.currentStage ?? null;
+    return FUNNEL_BANDS.map((band) => ({
+      id: band.id,
+      label: band.label,
+      hint: band.hint,
+      steps: band.stages.map((id) => {
+        const timing = completed.get(id);
+        let status: 'pending' | 'current' | 'done' = 'pending';
+        if (current === id) status = 'current';
+        else if (timing) status = 'done';
+        return {
+          id,
+          label: STAGE_LABELS[id] ?? id,
+          status,
+          count: this.countFor(id, p),
+          ms: timing ? ms(timing.millis) : null,
+          engine: this.engineFor(id, h),
+        };
+      }),
+    }));
+  });
+
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
   // re-exported for the template
   readonly num = num;
   readonly usd = usd;
@@ -594,6 +764,41 @@ export class DashboardComponent implements OnInit {
     void this.loadKpis();
     void this.loadLatestRun();
     void this.loadIncidents();
+    void this.loadProgress();
+    this.pollTimer = setInterval(() => void this.tickProgress(), 500);
+  }
+
+  ngOnDestroy(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private countFor(stage: string, p: RunProgress | null): string | null {
+    if (!p) return null;
+    if (stage === 'ingest' && p.trips != null) {
+      return compact(p.trips) + ' trips';
+    }
+    if (stage === 'scan') {
+      const bits: string[] = [];
+      if (p.seriesEvaluated != null) bits.push(compact(p.seriesEvaluated) + ' series');
+      if (p.findings != null) bits.push(compact(p.findings) + ' hits');
+      return bits.length ? bits.join(' · ') : null;
+    }
+    if (stage === 'rank' && p.candidates != null) {
+      return compact(p.candidates) + ' candidates';
+    }
+    if (stage === 'persist' && p.incidents != null) {
+      return compact(p.incidents) + ' incidents';
+    }
+    return null;
+  }
+
+  private engineFor(stage: string, h: Health | null): string {
+    if (!LLM_STAGES.has(stage)) return 'code';
+    const tier = h?.stageTiers?.[stage];
+    return tier && tier !== 'deterministic' ? tier : 'deterministic';
   }
 
   fmt(v: number | null, unit: string): string {
@@ -691,16 +896,39 @@ export class DashboardComponent implements OnInit {
     }
   }
 
+  async loadProgress(): Promise<void> {
+    try {
+      const p = await this.api.runProgress();
+      this.progress.set(p);
+    } catch {
+      /* a missing progress endpoint should not blank the dashboard */
+    }
+  }
+
+  private async tickProgress(): Promise<void> {
+    try {
+      this.progress.set(await this.api.runProgress());
+    } catch {
+      /* keep the last snapshot */
+    }
+  }
+
   async runNow(): Promise<void> {
     this.running.set(true);
     this.runError.set(null);
     try {
       this.summary.set(await this.api.run());
-      await Promise.all([this.loadIncidents(), this.loadKpis(), this.loadHealth()]);
+      await Promise.all([
+        this.loadIncidents(),
+        this.loadKpis(),
+        this.loadHealth(),
+        this.loadProgress(),
+      ]);
     } catch (e) {
       this.runError.set(this.reason(e));
     } finally {
       this.running.set(false);
+      await this.loadProgress();
     }
   }
 

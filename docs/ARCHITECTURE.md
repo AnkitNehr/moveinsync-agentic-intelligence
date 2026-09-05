@@ -95,7 +95,7 @@ flowchart TB
 | `pipeline/` | Orchestration and cadence | `SenseReasonActPipeline` · `CadenceScheduler` |
 | `delivery/` | Outbox, owner routing, console sink | `DeliveryService` · `OutboxStore` · `OwnerRouter` · `NotificationSink` |
 | `audit/` | Who was told what, and why | `AuditLog` |
-| `controller/` | REST: runs, incidents, outbox, follow-ups, chat, briefs | `RunController` · `IncidentController` · `OutboxController` · … |
+| `controller/` | REST: runs, incidents, outbox, follow-ups, chat, briefs | `RunController` (`POST /api/runs`, `GET /api/runs/progress`) · … |
 | `frontend/` | Angular console | dashboard · incident · chat · brief · outbox |
 
 ---
@@ -104,6 +104,7 @@ flowchart TB
 
 ```
 POST /api/runs {"period":"2026-06-01","priorPeriod":"2026-05-01"}
+        │  (stays blocked; GET /api/runs/progress is the live funnel)
         │
   ①  ingest        3.4M rows → DuckDB views, 15 quirks flagged      ~8s   code
   ②  metric        8 metrics × 9 dimensions                          ~2s   code
