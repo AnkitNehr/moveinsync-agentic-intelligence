@@ -77,10 +77,26 @@ public class DeterministicReasoner implements ReasoningPort {
         StringBuilder prose = new StringBuilder();
         List<Evidence> evidence = new ArrayList<>();
 
+        // Headed sections rather than one paragraph.
+        //
+        // The same five sections were already being written; they were separated by nothing but a
+        // space, so the movement, the peer rank, the correlated slices, the dimension scan, the
+        // rate/mix verdict, the rejected dimensions, the reconciliation, the coverage and four data
+        // caveats arrived as a single 300-word block. Every sentence in it was true and the reader
+        // still had to mine it for the one that mattered.
+        //
+        // The headings are the questions an operator actually asks, in the order they ask them:
+        // what moved, what caused it, what we ruled out, how far to trust it. Nothing is added or
+        // removed — this is the same content, made navigable.
+        prose.append("**What moved.** ");
         appendMovement(prose, evidence, lead);
         appendReferences(prose, evidence, lead);
         appendCorrelatedSlices(prose, evidence, findings);
+
+        prose.append("\n\n**Root cause.** ");
         String hypothesis = appendAttribution(prose, evidence, lead, attribution);
+
+        prose.append("\n\n**How far to trust this.** ");
         appendQuality(prose, lead);
 
         return new Explanation(prose.toString().trim(), evidence, hypothesis);
@@ -241,6 +257,11 @@ public class DeterministicReasoner implements ReasoningPort {
         }
 
         appendMixVerdict(prose, evidence, winner, metricId);
+
+        // The rejected dimensions are the checkable half of the claim above, so they get their own
+        // heading rather than trailing the cause as an afterthought. "We looked at six and this one
+        // won" is an assertion; naming the five that lost and why is what makes it auditable.
+        prose.append("\n\n**What we ruled out.** ");
         appendRejections(prose, evidence, attribution, metricId);
         appendReconciliation(prose, winner, metricId);
 

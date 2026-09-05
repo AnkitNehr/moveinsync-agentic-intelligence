@@ -282,12 +282,16 @@ interface WaterfallRow {
             @if (a.reconciliation; as rec) {
               <div class="recon" [class.bad]="!rec.reconciles">
                 <span class="recon-icon" aria-hidden="true">{{ rec.reconciles ? '✓' : '!' }}</span>
+                <!-- The raw tolerance is deliberately not shown. It is a RELATIVE bound — 0.005 means
+                     half a percent of the movement, not half a rupee — so printing the constant beside
+                     an absolute error produced "error 0.007241745 (tolerance 0.005000000) —
+                     reconciles", which reads as the verdict contradicting the arithmetic beside it.
+                     What a reader needs is how big the gap is against the movement it belongs to. -->
                 <span class="num">
                   <b>Parts sum to total:</b>
                   {{ fmtDelta(rec.explainedSum) }} explained vs {{ fmtDelta(rec.actualDelta) }} actual
-                  &middot; error {{ num(rec.error, 9) }}
-                  (tolerance {{ num(rec.tolerance, 9) }}) &mdash;
-                  <b>{{ rec.reconciles ? 'reconciles' : 'does not reconcile' }}</b>
+                  &mdash; <b>{{ rec.reconciles ? 'reconciles' : 'does not reconcile' }}</b>
+                  <span class="recon-gap">{{ reconGap(rec) }}</span>
                 </span>
                 @if (rec.note) { <span class="recon-note">{{ rec.note }}</span> }
               </div>
@@ -1040,6 +1044,23 @@ export class IncidentComponent implements OnInit, OnChanges {
       default:
         return `${sign}${magnitude.toFixed(2)}`;
     }
+  }
+
+  /**
+   * The residual, expressed against the movement it belongs to.
+   *
+   * An absolute error means nothing on its own: 0.0072 is floating-point dust against a movement of
+   * 16.16 and a serious gap against a movement of 0.03. Stating it as a share of the total is the
+   * only form a reader can judge, and it matches how the backend actually decides — the tolerance
+   * is relative, which is why the raw constant looked violated when it was not.
+   */
+  reconGap(rec: { error?: number | null; actualDelta?: number | null }): string {
+    const err = Math.abs(rec.error ?? 0);
+    const total = Math.abs(rec.actualDelta ?? 0);
+    if (!Number.isFinite(err) || err === 0) return '(exact)';
+    if (total === 0) return '';
+    const share = (err / total) * 100;
+    return share < 0.01 ? '(rounding only)' : `(gap ${share.toFixed(2)}% of the movement)`;
   }
 
   /**

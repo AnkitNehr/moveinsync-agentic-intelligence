@@ -114,7 +114,7 @@ public final class BuiltInNarrator implements NarrativePort {
                     brief.append("- **Permitted now** ").append(permitted).append('\n');
                 }
                 if (incident.followUpAt() != null && !incident.followUpAt().isBlank()) {
-                    brief.append("- **Re-check scheduled** ").append(incident.followUpAt()).append('\n');
+                    brief.append("- **Re-checked on** ").append(format.humanDate(incident.followUpAt())).append('\n');
                 }
                 brief.append('\n');
             }
@@ -152,13 +152,13 @@ public final class BuiltInNarrator implements NarrativePort {
         if (findings.isEmpty()) {
             return;
         }
-        body.append("**What moved.**\n\n");
+        body.append("**The numbers.**\n\n");
         for (Finding finding : findings) {
             if (finding == null) {
                 continue;
             }
-            body.append("- `").append(finding.metricId()).append("` on **")
-                    .append(finding.dimension()).append(" = ").append(finding.entity()).append("**: ")
+            body.append("- **").append(format.label(finding.metricId())).append("** for ")
+                    .append(format.entityPhrase(finding.dimension(), finding.entity())).append(": ")
                     .append(format.value(finding.metricId(), finding.prior()))
                     .append(" in ").append(finding.priorPeriod()).append(" to ")
                     .append(format.value(finding.metricId(), finding.current()))
@@ -174,8 +174,11 @@ public final class BuiltInNarrator implements NarrativePort {
         if (incident.explanation() == null || incident.explanation().isBlank()) {
             return;
         }
-        body.append("**What the decomposition shows.**\n\n")
-                .append(incident.explanation()).append("\n\n");
+        // No heading of its own. The explanation now arrives already sectioned — what moved, root
+        // cause, what we ruled out, how far to trust it — so wrapping it in one more heading nested
+        // those inside it and printed "What moved" twice, once as this file's raw-figures list and
+        // again as the reasoner's opening sentence.
+        body.append(incident.explanation()).append("\n\n");
     }
 
     private void appendEvidence(StringBuilder body, Incident incident) {
@@ -208,9 +211,8 @@ public final class BuiltInNarrator implements NarrativePort {
             if (action == null) {
                 continue;
             }
-            body.append(action.permitted() ? "- **PERMITTED** " : "- _blocked_ ")
-                    .append('`').append(action.type()).append('`')
-                    .append(" → ").append(nullSafe(action.target(), "operations"))
+            body.append(action.permitted() ? "- **You can now** " : "- _Not yet available_ — ")
+                    .append(format.actionPhrase(action.type(), action.target()))
                     .append("  \n  ").append(nullSafe(action.reason(), "")).append('\n');
         }
         body.append('\n');
@@ -272,14 +274,15 @@ public final class BuiltInNarrator implements NarrativePort {
         };
     }
 
-    private static String permittedSummary(Incident incident) {
+    /** Permitted actions as instructions, not as the guard's internal constants. */
+    private String permittedSummary(Incident incident) {
         if (incident.recommendedActions() == null) {
             return "";
         }
         return incident.recommendedActions().stream()
                 .filter(action -> action != null && action.permitted())
-                .map(Action::type)
-                .reduce((a, b) -> a + ", " + b)
+                .map(action -> format.actionPhrase(action.type(), action.target()))
+                .reduce((a, b) -> a + "; " + b)
                 .orElse("");
     }
 

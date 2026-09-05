@@ -105,12 +105,14 @@ public class DeterministicTriage implements TriagePort {
     }
 
     private String title(Finding lead) {
-        return "%s %s %s on %s = %s".formatted(
+        // "on shift_type = 08:00" was a column name and an equals sign in the most-read string in
+        // the product. entityPhrase lives in MetricFormat so the list, the brief, the chat answer
+        // and every LLM payload that quotes a title all say it the same way.
+        return "%s %s %s for %s".formatted(
                 format.label(lead.metricId()),
                 format.movement(lead.deltaPts()),
                 format.delta(lead.metricId(), lead.deltaPts()),
-                lead.dimension(),
-                lead.entity());
+                format.entityPhrase(lead.dimension(), lead.entity()));
     }
 
     /**
