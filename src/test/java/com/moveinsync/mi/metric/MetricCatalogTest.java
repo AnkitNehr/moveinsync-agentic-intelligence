@@ -28,14 +28,15 @@ class MetricCatalogTest {
     private final MetricCatalog catalog = new MetricCatalog();
 
     @Test
-    @DisplayName("ships exactly the eight metrics, all valid")
-    void shipsEightValidMetrics() {
+    @DisplayName("ships exactly the nine metrics, all valid")
+    void shipsNineValidMetrics() {
         assertEquals(
-                List.of("cost_per_km", "cost_per_trip", "delay_p90", "driver_noncompliance",
-                        "escort_compliance", "noshow_rate", "occupancy", "ota"),
+                List.of("cab_noncompliance", "cost_per_km", "cost_per_trip", "delay_p90",
+                        "driver_noncompliance", "escort_compliance", "noshow_rate", "occupancy",
+                        "ota"),
                 catalog.ids());
         catalog.all().forEach(MetricDefinition::validate);
-        assertEquals(8, catalog.size());
+        assertEquals(9, catalog.size());
     }
 
     @Test

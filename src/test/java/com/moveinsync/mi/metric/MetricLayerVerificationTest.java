@@ -76,8 +76,9 @@ class MetricLayerVerificationTest {
     @DisplayName("catalog loads all eight metrics and every definition validates")
     void catalogLoads() {
         assertEquals(
-                List.of("cost_per_km", "cost_per_trip", "delay_p90", "driver_noncompliance",
-                        "escort_compliance", "noshow_rate", "occupancy", "ota"),
+                List.of("cab_noncompliance", "cost_per_km", "cost_per_trip", "delay_p90",
+                        "driver_noncompliance", "escort_compliance", "noshow_rate", "occupancy",
+                        "ota"),
                 catalog.ids());
         assertEquals(List.of("bills", "trips"), catalog.sourceViews());
         catalog.all().forEach(MetricDefinition::validate);

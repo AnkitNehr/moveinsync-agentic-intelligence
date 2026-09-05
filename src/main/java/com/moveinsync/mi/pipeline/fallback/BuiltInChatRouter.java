@@ -154,6 +154,29 @@ public final class BuiltInChatRouter implements ChatPort {
      * cause, a policy verdict and a set of actions the guard had already ruled on. The data was
      * there; the two halves of the system simply could not see each other.
      */
+    /**
+     * Words that ask for a subject's whole picture rather than one measure.
+     *
+     * <p>"Tell me about Isha Mikhailov Travel" is the question an operator asks first — before they
+     * know which metric is the problem — and it was the one shape the router could not handle. It
+     * names no measure, so metric resolution failed and the question was declined, while the platform
+     * held a value for that vendor on every metric that slices by vendor.
+     */
+    private static final List<String> SUMMARY_WORDS =
+            List.of("tell me about", "about the", "summarise", "summarize", "summary",
+                    "details about", "details for", "detail on", "profile", "overview",
+                    "how is", "how are", "how did", "performance of", "look at");
+
+    /**
+     * Metrics named in a profile.
+     *
+     * <p>Set to the full catalog deliberately. A cap of six truncated in catalog order, which is
+     * alphabetical, so on-time arrival and occupancy — the two an operator asks about first — fell
+     * off the end of every vendor profile. A profile that silently omits the headline measure is
+     * worse than no profile, because the reader has no way to know something was dropped.
+     */
+    private static final int PROFILE_METRIC_LIMIT = 32;
+
     private static final List<String> ADVICE_WORDS =
             List.of("what should", "what do i do", "what to do", "how do i fix", "how should",
                     "recommend", "action", "next step", "should i", "what can i do", "help with",
@@ -195,6 +218,20 @@ public final class BuiltInChatRouter implements ChatPort {
             Answer advice = incidentAnswer(normalised);
             if (advice != null) {
                 return advice;
+            }
+        }
+
+        // "Tell me about Isha Mikhailov Travel" names a subject but no measure, so every path below
+        // this point declines it — resolveMetric finds nothing and the question dies. That is the
+        // wrong answer to a completely reasonable request: the operator wants the entity's profile,
+        // and the platform holds a value for it on every metric that slices by its dimension.
+        //
+        // Checked before metric resolution, and only when no metric was named, so "cost per trip for
+        // Isha Mikhailov Travel" stays a lookup rather than becoming a profile.
+        if (SUMMARY_WORDS.stream().anyMatch(normalised::contains) && resolveMetric(normalised) == null) {
+            Answer profile = entityProfileAnswer(normalised, defaultPeriod);
+            if (profile != null) {
+                return profile;
             }
         }
 
@@ -499,6 +536,162 @@ public final class BuiltInChatRouter implements ChatPort {
                 citations,
                 UsageLedger.Usage.ZERO,
                 false);
+    }
+
+    /**
+     * Everything the platform knows about one entity, across every metric that slices by its
+     * dimension, with each figure placed against the fleet.
+     *
+     * <p>A single metric is not what the question asks for. "How is this vendor doing" is answered by
+     * on-time arrival <em>and</em> cost <em>and</em> no-shows together — a vendor can be punctual and
+     * expensive, and reporting either alone is a half-truth that leads somewhere wrong.
+     *
+     * <p>Each line carries the entity's value, its rank within the cohort, and the cohort median, so
+     * the reader never has to hold a baseline in their head. Open incidents are named at the end
+     * because a profile that omits "there is a CRITICAL incident on this vendor" is worse than no
+     * profile at all.
+     *
+     * @return the profile, or null when no entity in the fact store is named in the question — the
+     *         caller then falls through to normal handling rather than inventing a subject
+     */
+    private Answer entityProfileAnswer(String normalisedQuestion, String defaultPeriod) {
+        ProfileSubject found = resolveProfileSubject(normalisedQuestion, defaultPeriod);
+        if (found == null) {
+            return null;
+        }
+        final Slice subject = found.slice();
+        final String period = found.period();
+
+        StringBuilder answer = new StringBuilder(1024);
+        List<Evidence> citations = new ArrayList<>();
+        answer.append(capitalise(format.entityPhrase(subject.dimension(), subject.entity())))
+                .append(" in ").append(friendlyPeriod(period)).append(", across everything measured:\n");
+
+        // Collected first, then ordered by how far this entity sits from its cohort, worst end
+        // first. Catalog order is alphabetical and says nothing about what matters: a vendor sitting
+        // 21st of 21 on no-shows at six times the median should be the first line a reader sees, not
+        // the sixth. The line itself always states the rank and the median, so the ordering is a
+        // convenience rather than a claim the reader has to take on trust.
+        record ProfileLine(String text, String metricId, int rank, int cohortSize) {
+            double standout() {
+                return cohortSize <= 1 ? 0.0 : (rank - 1.0) / (cohortSize - 1.0);
+            }
+        }
+        List<ProfileLine> lines = new ArrayList<>();
+
+        for (MetricDefinition definition : catalog.all()) {
+            if (lines.size() >= PROFILE_METRIC_LIMIT || !definition.supports(subject.dimension())) {
+                continue;
+            }
+            List<MetricSlice> cohort;
+            try {
+                cohort = metrics.slices(definition.id(), subject.dimension(), period).stream()
+                        .filter(MetricSlice::measured)
+                        .toList();
+            } catch (RuntimeException e) {
+                log.debug("Profile skipped {} on {}: {}", definition.id(), subject.dimension(), e.toString());
+                continue;
+            }
+            MetricSlice mine = cohort.stream()
+                    .filter(s -> subject.entity().equals(s.entity()))
+                    .findFirst()
+                    .orElse(null);
+            if (mine == null) {
+                continue;
+            }
+
+            // Rank is stated in the metric's own direction, so "3rd of 21" always means third best
+            // rather than third largest — otherwise the reader has to remember which way each
+            // metric points, which is exactly the work this is supposed to remove.
+            boolean higherIsBetter = definition.higherIsBetter();
+            List<MetricSlice> ordered = cohort.stream()
+                    .sorted(higherIsBetter
+                            ? Comparator.comparingDouble((MetricSlice s) -> s.value()).reversed()
+                            : Comparator.comparingDouble(MetricSlice::value))
+                    .toList();
+            int rank = ordered.indexOf(mine) + 1;
+
+            String line = "%s %s — %s of %d %ss, cohort median %s".formatted(
+                    format.label(definition.id()),
+                    format.value(definition.id(), mine.value()),
+                    ordinal(rank),
+                    ordered.size(),
+                    DIMENSION_LABELS.getOrDefault(subject.dimension(),
+                            subject.dimension().replace('_', ' ')),
+                    format.value(definition.id(), median(ordered)));
+            lines.add(new ProfileLine(line, definition.id(), rank, ordered.size()));
+        }
+
+        lines.sort(Comparator.comparingDouble(ProfileLine::standout).reversed());
+        for (ProfileLine l : lines) {
+            answer.append("\n• ").append(l.text());
+            citations.add(new Evidence(l.text(), l.metricId(), subject.entity()));
+        }
+        int reported = lines.size();
+
+        if (reported == 0) {
+            return null;
+        }
+
+        String openOnThis = incidents.openIncidents().stream()
+                .filter(i -> i.findingIds().stream().anyMatch(f -> {
+                    String[] parts = f.split(":");
+                    return parts.length > 2 && matchKey(parts[2]).equals(matchKey(subject.entity()));
+                }))
+                .map(i -> i.title())
+                .collect(Collectors.joining("; "));
+        answer.append(openOnThis.isBlank()
+                ? "\n\nNo incident is currently open against it."
+                : "\n\nOpen against it right now: " + openOnThis + ".");
+
+        log.info("Chat profiled {}={} across {} metrics", subject.dimension(), subject.entity(), reported);
+        return new Answer(
+                answer.toString().trim(),
+                new ResolvedCall(TOOL_OBSERVE, "profile", subject.dimension(), subject.entity(), period),
+                citations,
+                UsageLedger.Usage.ZERO,
+                false);
+    }
+
+    /** A resolved profile subject: which entity, on which dimension, in which period. */
+    private record ProfileSubject(Slice slice, String period) {}
+
+    /**
+     * Finds the entity a profile question names, without being told a metric.
+     *
+     * <p>Stops at the first metric that recognises the name. Entities live on shared dimensions, so
+     * whichever metric finds "Isha Mikhailov Travel" on vendor establishes the dimension, and every
+     * other vendor-sliced metric can then be read directly — there is no need to keep searching once
+     * the subject is known.
+     */
+    private ProfileSubject resolveProfileSubject(String normalisedQuestion, String defaultPeriod) {
+        for (MetricDefinition definition : catalog.all()) {
+            String candidatePeriod = resolvePeriod(normalisedQuestion, defaultPeriod, definition.id());
+            if (candidatePeriod == null) {
+                continue;
+            }
+            Slice found = resolveEntity(definition.id(), candidatePeriod, normalisedQuestion);
+            if (!MetricSpec.GLOBAL.equals(found.dimension())) {
+                return new ProfileSubject(found, candidatePeriod);
+            }
+        }
+        return null;
+    }
+
+    private static String ordinal(int n) {
+        if (n % 100 >= 11 && n % 100 <= 13) {
+            return n + "th";
+        }
+        return switch (n % 10) {
+            case 1 -> n + "st";
+            case 2 -> n + "nd";
+            case 3 -> n + "rd";
+            default -> n + "th";
+        };
+    }
+
+    private static String capitalise(String s) {
+        return s == null || s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
 
     /**

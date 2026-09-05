@@ -55,9 +55,19 @@ app:
     # which is where a ceiling belongs, so it is left at 85.0 deliberately rather
     # than by inertia. Retuning it is a business decision, not a mechanical fix.
     cost-per-km-distance-contracts: 85.0
-    # Mean billed cost per trip is 1331 (May) / 1340 (Jun) / 1356 (Jul);
-    # median 1275, p90 1860. 1400 is a ceiling with headroom above the trend.
-    cost-per-trip: 1400.0
+    # DELIBERATELY ABSENT: cost-per-trip.
+    #
+    # A ceiling of 1400.0 sat here for most of the build — mean billed cost per trip is 1331 (May) /
+    # 1340 (Jun) / 1356 (Jul), median 1275, p90 1860, so the number itself was defensible. It was
+    # also dead: cost_per_trip.yaml carries sla_key: null, SlaPolicy binds only the four keys above,
+    # and nothing ever read it. The console correctly reported "no target is written against this
+    # metric" while this file appeared to state one.
+    #
+    # Removed rather than wired, because there is no such contract. Unlike on-time arrival or escort
+    # coverage, nobody has agreed a cost-per-trip threshold with a vendor, so a breach against it
+    # would carry no authority and could not justify an escalation. Cost movements still surface —
+    # as statistical incidents, on the size of the movement, which is what the evidence supports.
+    # Config that claims a rule the system does not enforce is worse than no config.
 
   policy:
     # Vendor letters require both persistence and evidence. Below this explanatory

@@ -120,8 +120,7 @@ public final class BuiltInNarrator implements NarrativePort {
             }
             if (open.size() > BRIEF_DETAIL_LIMIT) {
                 brief.append("_").append(open.size() - BRIEF_DETAIL_LIMIT)
-                        .append(" further incident(s) are open and are listed in full at "
-                                + "`GET /api/incidents`._\n\n");
+                        .append(" further incident(s) are open; the console lists them in full._\n\n");
             }
         }
 
