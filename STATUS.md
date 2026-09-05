@@ -133,13 +133,43 @@ originally assumed, because the data doesn't support it. That is the system work
    not trips. They pulled a business unit's cost/km to −21.13. Now excluded from unit cost,
    retained in total spend. **This quirk is not in the supplied data dictionary.**
 
-## ⚠️ Not yet verified
+## ✅ Frontend builds and serves
 
-- **LLM path** — no `ANTHROPIC_API_KEY` in the environment, so only the deterministic
-  fallback has been exercised. Export a key and re-run to light up triage clustering and
-  generated narrative. The app logs the degradation explicitly at startup.
-- **Frontend** — all 18 files written; `npm install` and a browser check still pending.
-- **`docs/FINDINGS.md`** — the synthesis agent is still running.
+```
+npx ng build    Application bundle generation complete — 264.56 kB (71.51 kB transferred)
+npx ng serve    http://localhost:4200
+curl localhost:4200/api/health   → proxy OK, 615,546 trips, 2 incidents
+```
+
+One fix was needed: Angular permits an `as` alias only on a *primary* `@if`, and the
+incident view used `@else if (incident(); as inc)`. That single NG5002 cascaded into
+30+ errors. Restructured to a nested primary `@if`.
+
+## ✅ Every endpoint responds
+
+```
+200  /api/health          200  /api/incidents      200  /api/runs/latest
+200  /api/metrics         200  /api/attribution    200  /api/reports/brief
+```
+
+Chat answers a supported question with per-claim `metricId` citations, and **declines**
+an unsupported one:
+
+> *"That question is outside the metric catalog, so I will not answer it — guessing here
+> would produce a number the dashboard disagrees with."*
+
+Put that in the demo. A chatbot that refuses is more convincing than one that always answers.
+
+## ⚠️ Still outstanding
+
+- **LLM path unverified** — no `ANTHROPIC_API_KEY` in the environment, so only the
+  deterministic fallback has been exercised. Export a key and re-run to light up triage
+  clustering and generated narrative. The app logs the degradation explicitly at startup.
+- **`docs/FINDINGS.md`** — synthesis agent still running. The seven per-area findings
+  documents are complete in `docs/findings/`.
+- **No browser screenshot taken** — the UI serves and proxies correctly, but nobody has
+  looked at it rendered. Open http://localhost:4200 and check the incident waterfall
+  before you demo.
 
 ## Undocumented quirks we found (not in their dictionary)
 
