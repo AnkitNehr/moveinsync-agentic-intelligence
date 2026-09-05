@@ -68,7 +68,15 @@ public class ChatController {
      * @param question the question, verbatim
      * @param period   period to assume when the question names none; optional
      */
-    public record ChatRequest(String question, String period) {
+    /**
+     * @param question         the question being asked
+     * @param period           period to default to when the question names none
+     * @param previousQuestion the question asked immediately before, if any — sent by the client so
+     *                         a follow-up like "what about June?" can be retried against it. Optional,
+     *                         and carried by the client rather than held server-side: there is no auth
+     *                         here, so a session store would be shared state with no owner.
+     */
+    public record ChatRequest(String question, String period, String previousQuestion) {
     }
 
     /**
@@ -122,6 +130,29 @@ public class ChatController {
                 : safeDefaultPeriod();
 
         ChatPort.Answer answer = ports.chat().ask(request.question(), defaultPeriod);
+
+        // Follow-ups, without giving the router a memory.
+        //
+        // "What is the no-show rate for July" then "what about June?" — the second question names a
+        // period and nothing else, so every resolver misses and it declines. Rather than thread
+        // conversation state through ChatPort and every implementation behind it, the client sends
+        // the previous question back and we retry the two of them together. "no-show rate for July
+        // what about June" resolves the metric from the first half and the period from the second.
+        //
+        // Retried only on a decline, so a question that already worked is never affected — the
+        // deterministic path stays exactly as fast and as cheap as it was. And no session state
+        // exists to leak between users or to survive a restart, which for a tool with no auth is
+        // the property worth having.
+        if (answer != null && answer.declined()
+                && request.previousQuestion() != null && !request.previousQuestion().isBlank()) {
+            String merged = request.previousQuestion().trim() + " " + request.question().trim();
+            ChatPort.Answer withContext = ports.chat().ask(merged, defaultPeriod);
+            if (withContext != null && !withContext.declined()) {
+                log.info("Follow-up '{}' resolved using the previous question", request.question());
+                answer = withContext;
+            }
+        }
+
         if (answer == null) {
             answer = ChatPort.Answer.decline(request.question(), catalog.labels());
         }

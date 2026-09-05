@@ -52,7 +52,13 @@ import { num, usd } from '../core/format';
       }
     </section>
 
-    @if (response(); as r) {
+    @for (turn of turns(); track $index) {
+      <!-- The question is echoed above its own answer. Without it the thread is a column of
+           replies to questions the reader has to remember, which is the failure mode of every
+           analytics chat that treats the answer as the artefact. -->
+      <div class="asked"><span class="asked-q">{{ turn.question }}</span></div>
+
+      @if (turn.response; as r) {
       <section class="panel" [class.declined]="r.declined">
         <div class="ans-head">
           <h2>{{ r.declined ? 'Declined' : 'Answer' }}</h2>
@@ -109,12 +115,39 @@ import { num, usd } from '../core/format';
           </div>
         }
       </section>
+      }
+    }
+
+    @if (loading()) {
+      <div class="asked"><span class="asked-q">{{ question }}</span></div>
+      <section class="panel thinking"><p class="hint">Resolving against the metric catalog…</p></section>
     }
   `,
   styles: [
     `
       :host {
         display: block;
+      }
+
+      /* The asked question, right-aligned above its answer — the one visual cue that says
+         "conversation" rather than "report". Deliberately quiet: the answer is the content. */
+      .asked {
+        display: flex;
+        justify-content: flex-end;
+        margin: 18px 0 6px;
+      }
+      .asked-q {
+        max-width: min(680px, 82%);
+        padding: 9px 14px;
+        border-radius: 14px 14px 3px 14px;
+        background: color-mix(in srgb, var(--accent, #4a7dff) 14%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent, #4a7dff) 26%, transparent);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .panel.thinking {
+        opacity: 0.72;
       }
 
       .panel {
@@ -356,7 +389,19 @@ export class ChatComponent implements OnInit {
   private readonly glossary = inject(GlossaryService);
 
   question = '';
-  readonly response = signal<ChatResponse | null>(null);
+  /**
+   * The conversation so far, oldest first.
+   *
+   * Previously one `response` signal, replaced on every ask — so the screen showed a single answer
+   * and the question that produced it was already gone from the input. That is a query box, not a
+   * conversation: a reader could not compare July against June without re-reading two screens, and
+   * the natural next move after any answer is to ask something adjacent to it.
+   *
+   * Keeping the turns is also what makes the resolved tool call worth showing. One call in isolation
+   * is a curiosity; a column of them beside a column of answers is the claim this screen exists to
+   * make — that every reply came from a metric-layer call, visibly, every time.
+   */
+  readonly turns = signal<{ question: string; response: ChatResponse }[]>([]);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
 
@@ -395,7 +440,13 @@ export class ChatComponent implements OnInit {
     this.loading.set(true);
     this.error.set(null);
     try {
-      this.response.set(await this.api.chat(q));
+      const prior = this.turns();
+      const previousQuestion = prior.length ? prior[prior.length - 1].question : undefined;
+      const response = await this.api.chat(q, undefined, previousQuestion);
+      this.turns.update((t) => [...t, { question: q, response }]);
+      // The box empties on success only. A failed ask leaves the text where it was so the question
+      // can be retried or edited rather than retyped.
+      this.question = '';
     } catch (e) {
       this.error.set(e instanceof Error ? e.message : String(e));
     } finally {

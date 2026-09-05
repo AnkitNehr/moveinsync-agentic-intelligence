@@ -204,11 +204,20 @@ export class ApiService {
     );
   }
 
-  chat(question: string, period?: string): Promise<ChatResponse> {
+  /**
+   * @param previousQuestion the turn before this one, so the server can retry a follow-up like
+   *                         "what about June?" against it. Carried by the client because there is no
+   *                         session here to hold it, which also means nothing leaks between users.
+   */
+  chat(question: string, period?: string, previousQuestion?: string): Promise<ChatResponse> {
     return this.request<ChatResponse>('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, period: period ?? null }),
+      body: JSON.stringify({
+        question,
+        period: period ?? null,
+        previousQuestion: previousQuestion ?? null,
+      }),
     });
   }
 
