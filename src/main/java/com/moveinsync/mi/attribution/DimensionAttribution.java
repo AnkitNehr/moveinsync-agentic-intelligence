@@ -50,8 +50,26 @@ public record DimensionAttribution(
      * @param tolerance acceptable absolute error
      * @return true when the contributions sum to the aggregate movement within tolerance
      */
+    /**
+     * Whether the contributions sum to the aggregate movement.
+     *
+     * <p>The tolerance is treated as <em>relative</em> to the size of the movement, with the supplied
+     * value also acting as an absolute floor for movements near zero. A fixed absolute threshold
+     * cannot serve this catalog: an on-time delta is a fraction (0.0286) while a cost-per-trip delta
+     * is rupees (16.16), three orders of magnitude apart. A single constant tuned for one flags
+     * perfectly sound arithmetic on the other — which is exactly what happened, with a floating-point
+     * residue of 0.0072 on a movement of 16.16 (0.04%) rendering as "does not reconcile" in red next
+     * to two numbers a reader can see are identical.
+     *
+     * <p>Reconciliation is a real check and stays a real check: the decomposition is exact by
+     * construction, so anything beyond floating-point noise means entities were dropped by the
+     * volume gate or carried a null dimension value, and the reader is told so.
+     *
+     * @param tolerance relative tolerance, e.g. 0.005 for 0.5% of the movement; also the absolute floor
+     */
     public boolean reconciles(double tolerance) {
-        return reconciliationError <= tolerance;
+        double bound = Math.max(Math.abs(tolerance), Math.abs(tolerance) * Math.abs(actualDelta));
+        return reconciliationError <= bound;
     }
 
     /**

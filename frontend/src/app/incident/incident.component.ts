@@ -234,7 +234,7 @@ interface WaterfallRow {
               </div>
               <div class="wf-total num">
                 aggregate delta <b [style.color]="a.actualDelta < 0 ? 'var(--neg)' : 'var(--pos)'">
-                  {{ pts(a.actualDelta) }}
+                  {{ fmtDelta(a.actualDelta) }}
                 </b>
               </div>
             </div>
@@ -260,11 +260,11 @@ interface WaterfallRow {
 
                   <div class="wf-value num" [class.neg]="r.negative">
                     <span aria-hidden="true">{{ r.negative ? '▼' : '▲' }}</span>
-                    {{ pts(r.c.total) }}
+                    {{ fmtDelta(r.c.total) }}
                   </div>
 
                   <div class="wf-split num" [title]="splitTitle(r.c)">
-                    rate {{ pts(r.c.rateEffect) }} &middot; mix {{ pts(r.c.mixEffect) }}
+                    rate {{ fmtDelta(r.c.rateEffect) }} &middot; mix {{ fmtDelta(r.c.mixEffect) }}
                   </div>
                 </div>
               }
@@ -276,7 +276,7 @@ interface WaterfallRow {
                 <span class="recon-icon" aria-hidden="true">{{ rec.reconciles ? '✓' : '!' }}</span>
                 <span class="num">
                   <b>Parts sum to total:</b>
-                  {{ pts(rec.explainedSum) }} explained vs {{ pts(rec.actualDelta) }} actual
+                  {{ fmtDelta(rec.explainedSum) }} explained vs {{ fmtDelta(rec.actualDelta) }} actual
                   &middot; error {{ num(rec.error, 9) }}
                   (tolerance {{ num(rec.tolerance, 9) }}) &mdash;
                   <b>{{ rec.reconciles ? 'reconciles' : 'does not reconcile' }}</b>
@@ -314,7 +314,7 @@ interface WaterfallRow {
                       <td class="r num">{{ num(d.explanatoryPower, 3) }}</td>
                       <td class="r num">{{ num(d.concentration, 3) }}</td>
                       <td class="r num">{{ num(d.dispersion, 3) }}</td>
-                      <td class="r num">{{ pts(d.explainedDelta) }}</td>
+                      <td class="r num">{{ fmtDelta(d.explainedDelta) }}</td>
                       <td class="r num">{{ d.entityCount }}</td>
                     </tr>
                   }
@@ -994,6 +994,30 @@ export class IncidentComponent implements OnInit, OnChanges {
       : this.unit() === 'rate'
         ? pct(v)
         : num(v, 2);
+  }
+
+  /**
+   * A signed movement in the metric's own unit.
+   *
+   * The attribution panel previously rendered every delta with `pts`, which is right for a rate and
+   * wrong for everything else — cost per trip moving by fifty rupees was shown as "+50.74 pts".
+   * Percentage points are a unit, not a decoration, and using them on a currency undermines the
+   * numbers beside them.
+   */
+  fmtDelta(v: number | null | undefined): string {
+    if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+    const sign = v > 0 ? '+' : v < 0 ? '−' : '';
+    const magnitude = Math.abs(v);
+    switch (this.unit()) {
+      case 'currency':
+        return `${sign}₹${magnitude.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+      case 'minutes':
+        return `${sign}${magnitude.toFixed(1)} min`;
+      case 'rate':
+        return `${sign}${magnitude.toFixed(2)} pts`;
+      default:
+        return `${sign}${magnitude.toFixed(2)}`;
+    }
   }
 
   trendColor(o: MetricObservation): string {
