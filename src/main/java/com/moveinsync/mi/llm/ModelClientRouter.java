@@ -13,7 +13,8 @@ import org.springframework.stereotype.Service;
  * <p>Selection is by credential, not by preference: whichever provider has a usable key wins, and
  * if both do the order below decides. That makes the provider an environment variable rather than a
  * deployment — the same jar runs on Anthropic in one environment and Gemini in another with no
- * rebuild, which is the property the architecture has been claiming all along.
+ * rebuild, which is the property the architecture has been claiming all along. Sarvam is the same
+ * swap for an OpenAI-compatible Indic endpoint.
  *
  * <p>If none is available every agentic stage degrades to its deterministic implementation and the
  * pipeline still completes. That is not a failure mode bolted on afterwards; it is the reason the
@@ -34,7 +35,7 @@ public class ModelClientRouter implements ModelClient {
 
         @Override
         public String unavailableReason() {
-            return "no model provider is configured (set ANTHROPIC_API_KEY or GEMINI_API_KEY)";
+            return "no model provider is configured (set ANTHROPIC_API_KEY, GEMINI_API_KEY or SARVAM_API_KEY)";
         }
 
         @Override
@@ -50,11 +51,11 @@ public class ModelClientRouter implements ModelClient {
 
     private final List<ModelClient> candidates;
 
-    public ModelClientRouter(ClaudeClient claude, GeminiClient gemini) {
-        // Anthropic first when both are funded: the prompts, the cache breakpoint and the tier price
-        // table were all written against it. Gemini is the fallback that keeps the agentic layer
-        // alive on an unfunded account, which is the common case for a prototype.
-        this.candidates = List.of(claude, gemini);
+    public ModelClientRouter(ClaudeClient claude, GeminiClient gemini, SarvamClient sarvam) {
+        // Anthropic first when more than one provider is funded: the prompts, the cache breakpoint
+        // and the tier price table were all written against it. Gemini and Sarvam keep the agentic
+        // layer alive when Anthropic is not configured.
+        this.candidates = List.of(claude, gemini, sarvam);
 
         ModelClient active = active();
         if (active == NONE) {

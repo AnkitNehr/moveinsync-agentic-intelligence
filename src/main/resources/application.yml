@@ -72,9 +72,9 @@ app:
 
   llm:
     # The provider is chosen by which credential is present, not by config. Set
-    # ANTHROPIC_API_KEY or GEMINI_API_KEY in the environment; ModelClientRouter picks
-    # whichever can actually serve, and falls through to the deterministic path if
-    # neither can. Set enabled: false to force the deterministic path deliberately.
+    # ANTHROPIC_API_KEY, GEMINI_API_KEY or SARVAM_API_KEY in the environment;
+    # ModelClientRouter picks whichever can actually serve, and falls through to
+    # the deterministic path if none can. Set enabled: false to force that path.
     enabled: true
     triage-model: claude-sonnet-5
     reasoning-model: claude-opus-5
@@ -92,6 +92,13 @@ app:
       cheap-model: gemini-3.6-flash
       mid-model: gemini-3.6-flash
       strong-model: gemini-3.6-flash
+
+    sarvam:
+      # OpenAI-compatible Chat Completions at https://api.sarvam.ai/v1/chat/completions.
+      # A 404 from a renamed model id is fixed here rather than in SarvamClient.
+      cheap-model: sarvam-105b
+      mid-model: sarvam-105b
+      strong-model: sarvam-105b
 
   cors:
     allowed-origins:
