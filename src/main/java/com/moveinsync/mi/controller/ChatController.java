@@ -119,7 +119,7 @@ public class ChatController {
 
         ChatPort.Answer answer = ports.chat().ask(request.question(), defaultPeriod);
         if (answer == null) {
-            answer = ChatPort.Answer.decline(request.question(), catalog.ids());
+            answer = ChatPort.Answer.decline(request.question(), catalog.labels());
         }
 
         auditLog.record("chat", AuditLog.STAGE_DELIVER,
@@ -143,7 +143,7 @@ public class ChatController {
                         answer.usage().estimatedCostUsd()),
                 answer.declined(),
                 ports.chat().tier(),
-                catalog.ids());
+                catalog.labels());
     }
 
     /**
@@ -155,7 +155,7 @@ public class ChatController {
     @GetMapping("/capabilities")
     public ChatCapabilities capabilities() {
         return new ChatCapabilities(
-                catalog.ids(),
+                catalog.labels(),
                 catalog.all().stream().map(definition ->
                         definition.id() + " — " + definition.label()).toList(),
                 ports.chat().tier(),

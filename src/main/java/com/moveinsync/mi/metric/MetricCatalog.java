@@ -164,6 +164,19 @@ public class MetricCatalog {
     }
 
     /**
+     * Every metric's display label, ordered — what to show a human.
+     *
+     * <p>Separate from {@link #ids()} because the two are for different audiences and mixing them up
+     * is a recurring tell. An id like {@code driver_noncompliance} is a stable key for URLs, audit
+     * records and cross-references; it is not a name, and it belongs nowhere a transport manager
+     * reads. The chat refusal listed ids for exactly this reason — it had a list of metrics to hand
+     * and reached for the wrong one.
+     */
+    public List<String> labels() {
+        return ordered.stream().map(MetricDefinition::label).toList();
+    }
+
+    /**
      * Logical grains a metric may be sliced by, including {@code global}.
      *
      * @param metricId stable metric identifier
