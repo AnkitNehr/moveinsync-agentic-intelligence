@@ -89,9 +89,26 @@ app:
       #        models/gemini-3.6-flash"
       # A config edit fixed it; no Java changed. That is the whole argument for keeping
       # provider details out of code.
-      cheap-model: gemini-3.6-flash
-      mid-model: gemini-3.6-flash
-      strong-model: gemini-3.6-flash
+      # The free tier meters GenerateRequestsPerDayPerProjectPerModel — 20 requests per day, and
+      # crucially per MODEL, not per project. One pipeline pass spends 11-25 calls, so a single
+      # model id is roughly one run per day before HTTP 429.
+      #
+      # gemini-3.6-flash was exhausted during a day of testing. Moving to 2.5-flash draws on a
+      # separate pool and costs nothing else: same endpoint, same wire format, same adapter. It is
+      # the cheapest possible demonstration of why the model id is configuration — a quota wall on
+      # the morning of a demo is fixed by editing this line, not by touching Java.
+      #
+      # If this one is also exhausted, any id from GET /v1beta/models with generateContent support
+      # will serve; pools are independent.
+      # Three ids, not one. The quota is metered per model, so pointing all three tiers at the same
+      # id puts all 11-25 calls of a run back into a single 20/day pool — which is what the previous
+      # edit did while its own comment explained why that could not work. Spreading the tiers across
+      # three pools is the whole benefit per-model metering offers, and it happens to be what the
+      # tier split is for anyway: triage is a cheap batched call, narrative is the one worth spending
+      # the better model on.
+      cheap-model: gemini-2.5-flash-lite
+      mid-model: gemini-2.5-flash
+      strong-model: gemini-flash-latest
 
     sarvam:
       # OpenAI-compatible Chat Completions at https://api.sarvam.ai/v1/chat/completions.
