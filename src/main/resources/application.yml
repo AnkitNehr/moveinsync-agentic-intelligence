@@ -96,6 +96,7 @@ app:
     sarvam:
       # OpenAI-compatible Chat Completions at https://api.sarvam.ai/v1/chat/completions.
       # A 404 from a renamed model id is fixed here rather than in SarvamClient.
+      # Thinking is disabled in SarvamClient (reasoning_effort: null).
       cheap-model: sarvam-105b
       mid-model: sarvam-105b
       strong-model: sarvam-105b

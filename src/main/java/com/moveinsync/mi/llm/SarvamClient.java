@@ -138,6 +138,11 @@ public class SarvamClient implements ModelClient {
 
             body.put("max_tokens", bounded);
             body.put("temperature", 0.2);
+            // Thinking is on by default (reasoning_effort=low). That burns completion
+            // tokens on hidden chain-of-thought, which is the wrong default for this
+            // app: every prompt already asks for strict JSON or plain markdown.
+            // Null is the documented off switch (Python None / JSON null).
+            body.putNull("reasoning_effort");
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(ENDPOINT))
