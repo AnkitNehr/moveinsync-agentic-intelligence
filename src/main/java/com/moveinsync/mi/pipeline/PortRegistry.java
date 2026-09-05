@@ -2,6 +2,7 @@ package com.moveinsync.mi.pipeline;
 
 import com.moveinsync.mi.attribution.AttributionService;
 import com.moveinsync.mi.benchmark.BenchmarkService;
+import com.moveinsync.mi.incident.IncidentStore;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.metric.MetricQueryService;
 import com.moveinsync.mi.pipeline.fallback.BuiltInChatRouter;
@@ -69,14 +70,15 @@ public class PortRegistry {
             MetricQueryService metrics,
             BenchmarkService benchmarks,
             AttributionService attribution,
-            MetricFormat format) {
+            MetricFormat format,
+            IncidentStore incidents) {
 
         this.triage = select("triage", triageProvider, TriagePort::tier, deterministicTriage);
         this.reasoning = select("reason", reasoningProvider, ReasoningPort::tier, deterministicReasoner);
         this.narrative = select("narrate", narrativeProvider, NarrativePort::tier,
                 new BuiltInNarrator(format));
         this.chat = select("chat", chatProvider, ChatPort::tier,
-                new BuiltInChatRouter(catalog, metrics, benchmarks, attribution, format));
+                new BuiltInChatRouter(catalog, metrics, benchmarks, attribution, format, incidents));
 
         log.info("Agentic ports resolved: triage={} reason={} narrate={} chat={}",
                 triage.tier(), reasoning.tier(), narrative.tier(), chat.tier());

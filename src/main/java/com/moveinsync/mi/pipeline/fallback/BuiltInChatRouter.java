@@ -4,6 +4,9 @@ import com.moveinsync.mi.attribution.AttributionResult;
 import com.moveinsync.mi.attribution.AttributionService;
 import com.moveinsync.mi.attribution.DimensionAttribution;
 import com.moveinsync.mi.benchmark.BenchmarkService;
+import com.moveinsync.mi.incident.IncidentStore;
+import com.moveinsync.mi.model.Action;
+import com.moveinsync.mi.model.Incident;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.metric.MetricDefinition;
 import com.moveinsync.mi.metric.MetricQueryService;
@@ -99,7 +102,16 @@ public final class BuiltInChatRouter implements ChatPort {
      */
     private static final List<String> SUPERLATIVES =
             List.of("worst", "best", "highest", "lowest", "top ", "bottom", "most", "least",
-                    "which ", "who ", "rank", "compare");
+                    "which ", "who ", "rank", "compare",
+                    // Must stay a superset of the direction words rankingAnswer understands. This
+                    // list is the GATE — resolveRankedDimension consults it to decide whether a
+                    // question is a ranking at all — so a word known to the ranker but missing here
+                    // is simply unreachable. "Our cheapest vendor" fell through to the fleet-wide
+                    // figure, silently answering neither "cheapest" nor "vendor", which is the exact
+                    // failure this class's own comment says must not happen. It only looked like it
+                    // worked because the phrasings tested also contained "which" or "most".
+                    "expensive", "costly", "cheapest", "cheaper", "biggest", "largest", "smallest",
+                    "longest", "shortest", "fewest");
 
     /** Natural phrasing to the grain it means, longest first so "business unit" beats "unit". */
     private static final Map<String, String> DIMENSION_WORDS = dimensionWords();
@@ -133,36 +145,63 @@ public final class BuiltInChatRouter implements ChatPort {
             "SHUTTLE", "shuttle trips",
             "SPOT_2.0", "spot-booked trips");
 
+    /**
+     * Words that ask what to DO rather than what a number IS.
+     *
+     * <p>These questions were previously declined, which was the least defensible refusal in the
+     * product: "what should I do about Clearwater Campus" was answered with a list of metric names
+     * while an open CRITICAL incident for Clearwater Campus sat one API call away, complete with a
+     * cause, a policy verdict and a set of actions the guard had already ruled on. The data was
+     * there; the two halves of the system simply could not see each other.
+     */
+    private static final List<String> ADVICE_WORDS =
+            List.of("what should", "what do i do", "what to do", "how do i fix", "how should",
+                    "recommend", "action", "next step", "should i", "what can i do", "help with",
+                    "deal with", "fix ");
+
     private final MetricCatalog catalog;
     private final MetricQueryService metrics;
     private final BenchmarkService benchmarks;
     private final AttributionService attribution;
     private final MetricFormat format;
+    private final IncidentStore incidents;
 
     public BuiltInChatRouter(
             MetricCatalog catalog,
             MetricQueryService metrics,
             BenchmarkService benchmarks,
             AttributionService attribution,
-            MetricFormat format) {
+            MetricFormat format,
+            IncidentStore incidents) {
         this.catalog = catalog;
         this.metrics = metrics;
         this.benchmarks = benchmarks;
         this.attribution = attribution;
         this.format = format;
+        this.incidents = incidents;
     }
 
     @Override
     public Answer ask(String question, String defaultPeriod) {
         if (question == null || question.isBlank()) {
-            return Answer.decline("", catalog.ids());
+            return Answer.decline("", catalog.labels());
         }
         String normalised = question.toLowerCase(Locale.ROOT);
+
+        // "What should I do about X" is a different question from "what is X", and the incident
+        // layer already holds the answer. Checked before metric resolution because an advice
+        // question that happens to name a metric still wants the incident, not the number.
+        if (ADVICE_WORDS.stream().anyMatch(normalised::contains)) {
+            Answer advice = incidentAnswer(normalised);
+            if (advice != null) {
+                return advice;
+            }
+        }
 
         String metricId = resolveMetric(normalised);
         if (metricId == null) {
             log.info("Declining chat question: no catalog metric resolved from '{}'", question);
-            return Answer.decline(question, catalog.ids());
+            return Answer.decline(question, catalog.labels());
         }
 
         String period = resolvePeriod(normalised, defaultPeriod, metricId);
@@ -223,14 +262,52 @@ public final class BuiltInChatRouter implements ChatPort {
      * but the highest cost, which is exactly why direction is declared in the catalog.
      */
     private Answer rankingAnswer(String metricId, String period, String grain, String normalisedQuestion) {
-        boolean wantsBest = normalisedQuestion.contains("best")
-                || normalisedQuestion.contains("highest")
-                || normalisedQuestion.contains("most");
         boolean higherIsBetter = catalog.find(metricId)
                 .map(MetricDefinition::higherIsBetter)
                 .orElse(true);
-        // "worst" on a higher-is-better metric means ascending; on cost it means descending.
-        boolean ascending = wantsBest != higherIsBetter;
+
+        // Two different kinds of superlative, and collapsing them inverts answers.
+        //
+        // "Best" and "worst" are QUALITY words: which end is which depends on the metric's declared
+        // direction, because the best cost is the lowest and the best on-time rate is the highest.
+        // "Most", "highest" and "expensive" are VALUE words: they mean the largest number whether or
+        // not a large number is desirable.
+        //
+        // Treating "most" as a synonym for "best" is what shipped, and it answered "which contract
+        // is most expensive" with the CHEAPEST contract, labelled "best" — it read "most" as
+        // "most good", inverted through cost's lower-is-better direction. The same fault silently
+        // reversed "which office has the most no-shows". A confidently wrong ranking is worse than
+        // a decline: the decline invites a rephrase, this invites a decision.
+        boolean wantsHighestValue = containsAny(normalisedQuestion,
+                "highest", "most", "top ", "expensive", "costly", "longest", "biggest", "largest");
+        boolean wantsLowestValue = containsAny(normalisedQuestion,
+                "lowest", "least", "fewest", "cheapest", "bottom", "shortest", "smallest");
+        boolean wantsBestQuality = normalisedQuestion.contains("best");
+
+        // Ascending puts the smallest value first, so the leader is whichever end was asked for.
+        boolean ascending;
+        if (wantsLowestValue) {
+            ascending = true;
+        } else if (wantsHighestValue) {
+            ascending = false;
+        } else if (wantsBestQuality) {
+            ascending = !higherIsBetter;
+        } else {
+            ascending = higherIsBetter;  // "worst", and the default when only a superlative is implied
+        }
+
+        // Describe the end we actually returned. A value question gets a value word: "the highest
+        // cost per trip" is true and checkable, where "the worst" quietly asserts a judgement the
+        // question never asked for.
+        String leaderWord;
+        String tailWord;
+        if (wantsLowestValue || wantsHighestValue) {
+            leaderWord = wantsLowestValue ? "lowest" : "highest";
+            tailWord = wantsLowestValue ? "the highest" : "the lowest";
+        } else {
+            leaderWord = wantsBestQuality ? "best" : "worst";
+            tailWord = wantsBestQuality ? "the weakest" : "the strongest";
+        }
 
         List<MetricSlice> ranked;
         try {
@@ -257,7 +334,7 @@ public final class BuiltInChatRouter implements ChatPort {
 
         String headline = "%s had the %s %s in %s, at %s across %,d trips.".formatted(
                 glossed(leader.entity()),
-                wantsBest ? "best" : "worst",
+                leaderWord,
                 label.toLowerCase(Locale.ROOT),
                 friendlyPeriod(period),
                 format.value(metricId, leader.value()),
@@ -270,7 +347,7 @@ public final class BuiltInChatRouter implements ChatPort {
             String spread = "For comparison, %s was %s at %s, and the middle of the %d %ss sits at %s."
                     .formatted(
                             glossed(other.entity()),
-                            wantsBest ? "the weakest" : "the strongest",
+                            tailWord,
                             format.value(metricId, other.value()),
                             ranked.size(),
                             dimensionLabel,
@@ -293,6 +370,191 @@ public final class BuiltInChatRouter implements ChatPort {
                 citations,
                 UsageLedger.Usage.ZERO,
                 false);
+    }
+
+    /**
+     * Answers "what should I do about X" from the open incident register.
+     *
+     * <p>Matching is done on the entity embedded in each incident's finding ids
+     * ({@code ota:office:clearwater_campus:2026_07}) rather than on its title, because titles are
+     * written by whichever agent was available — the deterministic one names the entity, an LLM may
+     * write "escort coverage is falling across offices, business units and a vendor" and name
+     * nothing. Finding ids are generated by the metric layer and have the same shape regardless of
+     * which model wrote the prose, so matching on them behaves identically on every provider.
+     *
+     * <p>Returns null rather than an empty answer when nothing matches, so the caller falls through
+     * to normal metric handling: "what should I do about cost per trip" is better served with the
+     * cost figure than with a shrug.
+     *
+     * @return the incident briefing, or null when no open incident mentions anything in the question
+     */
+    private Answer incidentAnswer(String normalisedQuestion) {
+        List<Incident> open = incidents.openIncidents();
+        if (open.isEmpty()) {
+            return null;
+        }
+
+        // Both sides are reduced to letters, digits and single spaces before comparing. Finding ids
+        // carry "08_00" while a human types "08:00", and "6s_hyd" against "6S-HYD" — punctuation is
+        // an artefact of id encoding on one side and of how people write on the other, and matching
+        // on it means matching on neither.
+        String haystack = matchKey(normalisedQuestion);
+
+        // Two-level ranking. Length first, so "crestwood campus" beats a bare "campus" several
+        // offices share. Then headline position: an entity can appear in more than one incident as a
+        // contributing slice — Ashford Commons shows up in both the cost and the occupancy incident —
+        // and the one a user means is the one it is the subject of, not the one it is a footnote in.
+        // When the question also names a metric, it constrains the match. Finding ids carry the
+        // metric in parts[0], so this is free — and without it "what should I do about cost at
+        // Ashford Commons" returns the occupancy incident, because Ashford Commons appears in both
+        // and only the entity was being compared. Answering about the wrong metric while repeating
+        // the entity back is the most convincing way to be wrong.
+        String askedMetric = resolveMetric(normalisedQuestion);
+
+        Incident best = null;
+        int bestLength = 0;
+        boolean bestIsHeadline = false;
+        for (Incident incident : open) {
+            List<String> findingIds = incident.findingIds();
+            for (int i = 0; i < findingIds.size(); i++) {
+                String[] parts = findingIds.get(i).split(":");
+                if (parts.length < 3) {
+                    continue;
+                }
+                if (askedMetric != null && !askedMetric.equals(parts[0])) {
+                    continue;
+                }
+                String phrase = matchKey(parts[2]);
+                // The global slice's entity is the literal "ALL", which normalises to a three-letter
+                // token that clears the length gate and is a substring of falling, small, overall,
+                // install and actually. Left in, an advice question about one metric would return a
+                // confident briefing for an unrelated one, and nothing in the answer would say a
+                // substitution had happened. A global finding also carries no entity to match on in
+                // the first place, so there is nothing lost by skipping it.
+                if (phrase.isEmpty() || phrase.equals("all") || phrase.equals("global")) {
+                    continue;
+                }
+                if (phrase.length() < MIN_TOKEN_LENGTH || !containsWord(haystack, phrase)) {
+                    continue;
+                }
+                boolean headline = i == 0;
+                boolean better = phrase.length() > bestLength
+                        || (phrase.length() == bestLength && headline && !bestIsHeadline);
+                if (better) {
+                    best = incident;
+                    bestLength = phrase.length();
+                    bestIsHeadline = headline;
+                }
+            }
+        }
+        if (best == null) {
+            return null;
+        }
+
+        StringBuilder answer = new StringBuilder(768);
+        List<Evidence> citations = new ArrayList<>();
+
+        // Severity is an SLA band, and NONE is a real value — metrics with no contractual target
+        // band that way routinely. Concatenated raw it produced "There is an open none incident",
+        // so the adjective is dropped rather than printed when there is no severity to state.
+        String band = best.severity() == null ? "" : SEVERITY_WORDS.getOrDefault(best.severity(), "");
+        answer.append("There is an open ").append(band.isEmpty() ? "" : band + " ")
+                .append("incident for this: ").append(best.title()).append(". ");
+        if (best.whyNow() != null && !best.whyNow().isBlank()) {
+            answer.append(best.whyNow()).append(' ');
+        }
+        citations.add(new Evidence(best.title(), "incident", best.id()));
+
+        // Permitted and blocked are both reported. A blocked action that simply vanished would be
+        // indistinguishable from one nobody considered, and the reason a thing is not allowed yet is
+        // usually the most useful sentence on the screen.
+        List<Action> permitted = best.recommendedActions().stream().filter(Action::permitted).toList();
+        List<Action> blocked = best.recommendedActions().stream().filter(a -> !a.permitted()).toList();
+
+        if (!permitted.isEmpty()) {
+            answer.append("What you can do now: ")
+                    .append(permitted.stream().map(this::actionPhrase).collect(Collectors.joining(", ")))
+                    .append(". ");
+        }
+        // Every blocked action, not just the first. The comment above argues that a silently dropped
+        // action is indistinguishable from one nobody considered — and reporting only blocked[0] did
+        // exactly that on every incident, because the guard's ladder always ends with two entries
+        // that are never auto-permitted.
+        if (!blocked.isEmpty()) {
+            answer.append("Not available yet: ");
+            for (int i = 0; i < blocked.size(); i++) {
+                Action a = blocked.get(i);
+                answer.append(actionPhrase(a)).append(" (").append(a.reason()).append(')')
+                        .append(i < blocked.size() - 1 ? "; " : ". ");
+                citations.add(new Evidence(a.reason(), "policy", best.id()));
+            }
+        }
+
+        answer.append("Open the incident for the full breakdown of what moved and why.");
+
+        log.info("Chat resolved an advice question to incident {}", best.id());
+        return new Answer(
+                answer.toString().trim(),
+                new ResolvedCall("incident", best.id(), null, null, null),
+                citations,
+                UsageLedger.Usage.ZERO,
+                false);
+    }
+
+    /**
+     * Reduces a string to lowercase letters, digits and single spaces for comparison.
+     *
+     * <p>Used on both sides of an entity match so that id encoding and human punctuation cannot
+     * disagree: {@code 08_00} and "08:00" both become "08 00", and {@code 6s_hyd} matches "6S-HYD".
+     */
+    private static String matchKey(String raw) {
+        return raw == null ? "" : raw.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    /**
+     * Whole-phrase containment: "all" must not match inside "falling", nor "bus" inside "business".
+     *
+     * <p>Both sides are already {@link #matchKey}-normalised to space-separated tokens, so padding
+     * with spaces is enough to force a boundary at each end without a regex.
+     */
+    private static boolean containsWord(String haystack, String phrase) {
+        return (" " + haystack + " ").contains(" " + phrase + " ");
+    }
+
+    /** SLA bands as adjectives. NONE maps to nothing so the sentence simply omits it. */
+    private static final Map<String, String> SEVERITY_WORDS = Map.of(
+            "CRITICAL", "critical",
+            "MAJOR", "significant",
+            "MINOR", "minor",
+            "NONE", "");
+
+    /**
+     * An action type as an instruction a person can follow.
+     *
+     * <p>{@code notify}, {@code vendor_escalation} and {@code review_allocation} are guard constants,
+     * and printing them raw put snake_case identifiers in user-facing prose in the same change that
+     * forbade the model from doing exactly that. The target is folded in because "escalate" without
+     * naming who is not advice.
+     */
+    private String actionPhrase(Action action) {
+        String target = action.target() == null || action.target().isBlank()
+                ? "" : " " + glossed(action.target());
+        return switch (action.type()) {
+            case "notify" -> "tell the team that owns" + (target.isEmpty() ? " it" : target);
+            case "vendor_escalation" -> "raise a formal escalation with the vendor behind" + target;
+            case "review_allocation" -> "review how volume is allocated across" + target;
+            case "auto_reallocate" -> "automatically move volume away from" + target;
+            default -> action.type().replace('_', ' ') + target;
+        };
+    }
+
+    private static boolean containsAny(String haystack, String... needles) {
+        for (String needle : needles) {
+            if (haystack.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static double median(List<MetricSlice> sorted) {
@@ -403,9 +665,16 @@ public final class BuiltInChatRouter implements ChatPort {
         answer.append(claim).append(' ');
         citations.add(new Evidence(claim, metricId, slice.entity()));
 
+        // How unusual, in words. The score is the reason this sentence exists and the wrong thing to
+        // print: a reader who has to ask what "2.7 robust z" means has been handed the working rather
+        // than the conclusion, and the conclusion is the only part they can act on.
         if (trend.robustZ() != null && Double.isFinite(trend.robustZ())) {
-            String zClaim = "That movement scores %.1f robust z against its reference distribution."
-                    .formatted(trend.robustZ());
+            double z = Math.abs(trend.robustZ());
+            String zClaim = z >= 3
+                    ? "That is far outside this measure's usual month-to-month range."
+                    : z >= 2
+                            ? "That is a larger move than this measure usually makes month to month."
+                            : "That is within this measure's usual month-to-month range.";
             answer.append(zClaim).append(' ');
             citations.add(new Evidence(zClaim, metricId, slice.entity()));
         }
@@ -755,6 +1024,45 @@ public final class BuiltInChatRouter implements ChatPort {
         table.put("driver compliance", "driver_noncompliance");
         table.put("non-compliance", "driver_noncompliance");
         table.put("noncompliance", "driver_noncompliance");
+
+        // Everything below is a broader, less precise term, and it is deliberately last: the map is
+        // a LinkedHashMap walked in insertion order, so "cost per km" is resolved by the specific
+        // entry above before the bare "cost" here can claim it.
+        //
+        // These exist because a decline is not free. Measured against twelve questions a transport
+        // manager would actually ask, five were refused — and four of those were refused for
+        // vocabulary alone, on metrics and dimensions the catalog already holds. "Why did costs go
+        // up in July" was declined while "what is the cost per trip" was answered, which reads to a
+        // user as the system being arbitrary rather than careful. Refusing to guess at a number is
+        // the right instinct; refusing to recognise a word for a number we hold is not the same
+        // thing, and conflating them spends the user's trust on nothing.
+        table.put("expensive", "cost_per_trip");
+        table.put("cheapest", "cost_per_trip");
+        table.put("cheap", "cost_per_trip");
+        table.put("cost", "cost_per_trip");
+        table.put("budget", "cost_per_trip");
+
+        // "Performance" is genuinely ambiguous in this domain — it could mean punctuality or unit
+        // cost. It resolves to on-time arrival because that is what a transport manager means by a
+        // vendor "performing badly", and because the answer names the metric it used, so a reader
+        // who meant cost can see the mismatch immediately and re-ask. A wrong-but-labelled answer
+        // is recoverable; a refusal ends the conversation.
+        table.put("perform", "ota");
+        table.put("reliab", "ota");
+        table.put("arrival", "ota");
+
+        table.put("absent", "noshow_rate");
+        table.put("missed", "noshow_rate");
+
+        // Deliberately absent: trip volume. "How many trips did we run in June" is a fair question
+        // and the number exists — every answer here already quotes it as a sample size — but it has
+        // no home in this catalog. MetricDefinition requires a direction, and volume has none: a
+        // month with fewer trips is not thereby better or worse, so whichever direction were
+        // declared the scanner would raise incidents for ordinary demand movement. Answering it
+        // properly needs a metric that can be queried but not alerted on, which is a catalog
+        // change rather than a synonym, and is left undone rather than faked with a direction
+        // nobody believes.
+
         return Collections.unmodifiableMap(table);
     }
 }
