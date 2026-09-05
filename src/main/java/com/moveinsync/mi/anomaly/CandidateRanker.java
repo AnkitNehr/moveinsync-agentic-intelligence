@@ -98,6 +98,9 @@ public class CandidateRanker {
 
         List<Finding> scored = new ArrayList<>(findings.size());
         for (Finding finding : findings) {
+            if (!worthSurfacing(finding)) {
+                continue;
+            }
             double score = score(finding, ctx);
             if (score <= SCORE_FLOOR) {
                 continue;
@@ -117,6 +120,57 @@ public class CandidateRanker {
         log.info("Ranked {} findings, {} scored above floor, returning top {}",
                 findings.size(), scored.size(), top.size());
         return top;
+    }
+
+    /** A movement this large in the good direction is usually instrumentation, not operations. */
+    private static final double INSTRUMENTATION_Z = 8.0;
+
+    /** Movements smaller than this, on a metric that is not breaching, are not worth a human. */
+    private static final double MIN_EFFECT = 0.5;
+
+    /**
+     * Decides whether a finding deserves to reach a human at all, before any scoring.
+     *
+     * <p>Two classes of noise are removed here, both of which look absurd on a console:
+     *
+     * <ul>
+     *   <li><b>Improvements raised as incidents.</b> "On-Time Arrival rose +5.25 pts — CRITICAL" is
+     *       indefensible: nobody is paged because a number got better. The one exception is an
+     *       improvement so large it is implausible ({@link #INSTRUMENTATION_Z}), which usually means
+     *       a rule stopped firing or a feed changed — the same shape as the alert type in this
+     *       dataset that fell 99.7% between May and July. That is worth surfacing, as a data
+     *       question rather than an operational one.
+     *   <li><b>Statistically loud, operationally trivial movements.</b> A metric with a very stable
+     *       history has a tiny MAD, so a rounding-scale change scores a huge robust z. Driver
+     *       non-compliance moving +0.06 points is real arithmetic and not a reason to interrupt
+     *       anyone. Below {@link #MIN_EFFECT} a finding must also be breaching its SLA to qualify.
+     * </ul>
+     *
+     * <p>An SLA breach always survives both gates: if a target is being missed, the size of this
+     * period's movement is not what makes it worth knowing.
+     */
+    private boolean worthSurfacing(Finding finding) {
+        double delta = finding.current() - finding.prior();
+        boolean adverse = catalog.find(finding.metricId())
+                .map(spec -> spec.isAdverse(delta))
+                .orElse(true);
+        boolean breaching = finding.observation() != null
+                && finding.observation().references() != null
+                && finding.observation().references().sla() != null
+                && finding.observation().references().sla().breached();
+
+        if (!adverse && Math.abs(finding.robustZ()) < INSTRUMENTATION_Z) {
+            log.debug("Dropping favourable movement on {} {}={} ({}), not an incident",
+                    finding.metricId(), finding.dimension(), finding.entity(), delta);
+            return false;
+        }
+        if (Math.abs(finding.deltaPts()) < MIN_EFFECT && !breaching) {
+            log.debug("Dropping trivial movement on {} {}={} ({} pts, z={})",
+                    finding.metricId(), finding.dimension(), finding.entity(),
+                    finding.deltaPts(), finding.robustZ());
+            return false;
+        }
+        return true;
     }
 
     /**
