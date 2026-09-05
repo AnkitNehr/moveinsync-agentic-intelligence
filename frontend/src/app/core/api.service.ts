@@ -251,4 +251,15 @@ export class ApiService {
       `/metrics/${encodeURIComponent(metricId)}/periods`,
     );
   }
+
+  /** Sliced observations across all entities on a dimension (e.g. vendor or office). */
+  metricSeries(
+    metricId: string,
+    dimension = 'vendor',
+    period?: string,
+  ): Promise<MetricObservation[]> {
+    return this.request<MetricObservation[]>(
+      `/metrics/${encodeURIComponent(metricId)}/series${this.query({ dimension, period })}`,
+    );
+  }
 }
