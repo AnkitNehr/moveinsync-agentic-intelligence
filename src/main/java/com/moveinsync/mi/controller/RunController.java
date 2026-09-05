@@ -1,6 +1,7 @@
 package com.moveinsync.mi.controller;
 
 import com.moveinsync.mi.model.Incident;
+import com.moveinsync.mi.model.RunProgress;
 import com.moveinsync.mi.model.RunSummary;
 import com.moveinsync.mi.pipeline.PortRegistry;
 import com.moveinsync.mi.pipeline.SenseReasonActPipeline;
@@ -64,6 +65,18 @@ public class RunController {
         String priorPeriod = request == null ? null : request.priorPeriod();
         log.info("Run requested via API: period={} prior={}", period, priorPeriod);
         return ResponseEntity.ok(pipeline.run(period, priorPeriod));
+    }
+
+    /**
+     * Live funnel for a run that is still executing, or the last completed snapshot.
+     *
+     * <p>Always 200. An idle platform returns {@code running: false} with empty counts rather than
+     * 404 — the console polls this while {@code POST /api/runs} is blocked, and a missing endpoint
+     * would look like a crash.
+     */
+    @GetMapping("/progress")
+    public RunProgress progress() {
+        return pipeline.progress();
     }
 
     /**

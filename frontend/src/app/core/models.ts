@@ -171,6 +171,27 @@ export interface RunSummary {
   stageTimings: string[];
 }
 
+export interface StageTiming {
+  stage: string;
+  millis: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** Live funnel snapshot from GET /api/runs/progress. Counts are null until that stage lands. */
+export interface RunProgress {
+  running: boolean;
+  runId: string | null;
+  startedAt: string | null;
+  currentStage: string | null;
+  completed: StageTiming[];
+  trips: number | null;
+  seriesEvaluated: number | null;
+  findings: number | null;
+  candidates: number | null;
+  incidents: number | null;
+}
+
 export interface LatestRun {
   summary: RunSummary;
   incidents: Incident[];

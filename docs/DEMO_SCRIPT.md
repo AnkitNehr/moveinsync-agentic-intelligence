@@ -69,12 +69,12 @@ curl -X POST localhost:8080/api/runs -H 'Content-Type: application/json' \
      -d '{"period":"2026-06-01","priorPeriod":"2026-05-01"}'
 ```
 
-> **SAY, immediately, while it runs:** "One POST. Three point four million rows, five sources, May
-> to July. While that goes — here's the shape of it. Everything up to the fourth line of that
-> funnel is deterministic Java: ingest, metric definitions, benchmarking, anomaly detection,
-> attribution, policy. **Nineteen hundred series evaluated, twenty candidates ranked, and only then
-> does a model get involved** — over about four kilobytes of already-computed JSON. It never sees a
-> trip row. That's the whole design: **code computes, AI judges.**"
+> **SAY, immediately, while it runs — Window 1, the Sense / Reason / Act funnel:** "One POST.
+> Three point four million rows, five sources, May to July. Watch Sense light up: ingest, scan,
+> rank, policy — that is all Java. **Nineteen hundred series evaluated, twenty candidates ranked,
+> and only then does Reason turn amber** — triage is the first model call, over about four
+> kilobytes of already-computed JSON. It never sees a trip row. That's the whole design: **code
+> computes, AI judges.**"
 
 The run takes ~4 minutes with LLM. **You are not going to wait for it.** Let it stream in the
 background and switch away.

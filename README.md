@@ -108,6 +108,7 @@ Then open **http://localhost:4200**. Or drive it entirely from the API:
 ```bash
 curl localhost:8080/api/health                                  # ingest coverage + quality flags
 curl localhost:8080/api/runs/latest                             # last run + its incidents
+curl localhost:8080/api/runs/progress                           # live funnel while a run is blocked
 curl localhost:8080/api/incidents                                # open incidents
 curl localhost:8080/api/incidents/INC-2026-06-001                # one incident, full payload
 curl 'localhost:8080/api/attribution?metric=ota&period=2026-06'  # the waterfall, all dimensions
@@ -305,7 +306,9 @@ For context: $40/month is under one hour of a transport manager's time, against 
 reads 3.4M rows every night. **Latency:** the deterministic core completes in **~15s** end to end
 (ingest ~8s dominates); a full agentic run is **~4 minutes**, of which ~3.5 minutes is the Opus
 reasoning and narrative stages. `POST /api/runs` is synchronous on purpose — if it ever needed a
-job queue, that would mean the funnel had stopped narrowing.
+job queue, that would mean the funnel had stopped narrowing. The dashboard polls
+`GET /api/runs/progress` so judges can watch Sense (code) finish before Reason (the first model
+call) starts, without turning the POST into a job queue.
 
 ---
 

@@ -13,6 +13,7 @@ import type {
   MetricObservation,
   MetricSummary,
   RecheckResponse,
+  RunProgress,
   RunSummary,
 } from './models';
 
@@ -115,6 +116,11 @@ export class ApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ period: period ?? null, priorPeriod: priorPeriod ?? null }),
     });
+  }
+
+  /** Live funnel. Always 200 — idle returns running:false rather than 404. */
+  runProgress(): Promise<RunProgress> {
+    return this.request<RunProgress>('/runs/progress');
   }
 
   /** The most recent run plus its incidents. 404 when nothing has run since boot. */
