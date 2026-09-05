@@ -2,6 +2,7 @@ package com.moveinsync.mi.controller;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.moveinsync.mi.audit.AuditLog;
+import com.moveinsync.mi.glossary.OperatorCopy;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.model.Evidence;
 import com.moveinsync.mi.pipeline.PortRegistry;
@@ -46,16 +47,19 @@ public class ChatController {
     private final MetricCatalog catalog;
     private final SenseReasonActPipeline pipeline;
     private final AuditLog auditLog;
+    private final OperatorCopy copy;
 
     public ChatController(
             PortRegistry ports,
             MetricCatalog catalog,
             SenseReasonActPipeline pipeline,
-            AuditLog auditLog) {
+            AuditLog auditLog,
+            OperatorCopy copy) {
         this.ports = ports;
         this.catalog = catalog;
         this.pipeline = pipeline;
         this.auditLog = auditLog;
+        this.copy = copy;
     }
 
     /**
@@ -133,9 +137,11 @@ public class ChatController {
                 request.question(), describe(answer), ports.chat().tier());
 
         return new ChatResponse(
-                answer.answer(),
+                copy.rewrite(answer.answer()),
                 answer.resolvedCall(),
-                answer.citations(),
+                answer.citations().stream()
+                        .map(item -> new Evidence(copy.rewrite(item.claim()), item.metricId(), item.entity()))
+                        .toList(),
                 new Usage(
                         answer.usage().promptTokens(),
                         answer.usage().completionTokens(),

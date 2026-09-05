@@ -2,6 +2,7 @@ package com.moveinsync.mi.pipeline.fallback;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.moveinsync.mi.glossary.ColumnDictionary;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.model.Finding;
 import com.moveinsync.mi.model.Industry;
@@ -33,7 +34,7 @@ import org.junit.jupiter.api.Test;
 class RenderedProseTest {
 
     private final MetricCatalog catalog = new MetricCatalog();
-    private final MetricFormat format = new MetricFormat(catalog);
+    private final MetricFormat format = new MetricFormat(catalog, new ColumnDictionary());
     private final DeterministicTriage triage = new DeterministicTriage(format, 5, 6);
 
     // ---- fixtures --------------------------------------------------------------------------------

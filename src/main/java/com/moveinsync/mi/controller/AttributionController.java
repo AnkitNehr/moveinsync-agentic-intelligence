@@ -3,6 +3,7 @@ package com.moveinsync.mi.controller;
 import com.moveinsync.mi.attribution.AttributionResult;
 import com.moveinsync.mi.attribution.AttributionService;
 import com.moveinsync.mi.attribution.DimensionAttribution;
+import com.moveinsync.mi.glossary.OperatorCopy;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.metric.MetricDefinition;
 import com.moveinsync.mi.metric.MetricQueryService;
@@ -38,16 +39,19 @@ public class AttributionController {
     private final AttributionService attribution;
     private final MetricCatalog catalog;
     private final MetricQueryService metrics;
+    private final OperatorCopy copy;
     private final double reconciliationTolerance;
 
     public AttributionController(
             AttributionService attribution,
             MetricCatalog catalog,
             MetricQueryService metrics,
+            OperatorCopy copy,
             @Value("${app.attribution.reconciliation-tolerance:0.005}") double reconciliationTolerance) {
         this.attribution = attribution;
         this.catalog = catalog;
         this.metrics = metrics;
+        this.copy = copy;
         this.reconciliationTolerance = Math.abs(reconciliationTolerance);
     }
 
@@ -194,13 +198,13 @@ public class AttributionController {
      * wrong story: when mix is negligible the same entities carried the same share and simply
      * performed worse, which has a different fix from volume moving to a weaker performer.
      */
-    private static String note(DimensionAttribution winner, AttributionResult result) {
+    private String note(DimensionAttribution winner, AttributionResult result) {
         double grossMix = winner.contributions().stream().mapToDouble(c -> Math.abs(c.mixEffect())).sum();
         double grossTotal = winner.contributions().stream().mapToDouble(c -> Math.abs(c.total())).sum();
         String leader = winner.leader() == null ? "no single entity" : winner.leader().entity();
 
         if (grossTotal <= 0.0) {
-            return "The winning dimension is " + winner.dimension()
+            return "The winning dimension is " + copy.grainLabel(winner.dimension())
                     + ", but no entity carried measurable movement.";
         }
         double mixFraction = grossMix / grossTotal;
@@ -213,7 +217,7 @@ public class AttributionController {
                         + "moving between entities rather than entities changing performance.";
 
         return "Of %d dimensions examined, %s explains the movement best and it is concentrated in %s. %s"
-                .formatted(result.ranked().size(), winner.dimension(), leader, driver);
+                .formatted(result.ranked().size(), copy.grainLabel(winner.dimension()), leader, driver);
     }
 
     private String resolvePeriod(MetricDefinition definition, String period) {

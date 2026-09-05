@@ -2,6 +2,7 @@ package com.moveinsync.mi.controller;
 
 import com.moveinsync.mi.benchmark.BenchmarkService;
 import com.moveinsync.mi.incident.IncidentStore;
+import com.moveinsync.mi.glossary.OperatorCopy;
 import com.moveinsync.mi.metric.MetricCatalog;
 import com.moveinsync.mi.metric.MetricDefinition;
 import com.moveinsync.mi.metric.MetricQueryService;
@@ -51,6 +52,7 @@ public class ReportController {
     private final MetricQueryService metrics;
     private final BenchmarkService benchmarks;
     private final MetricFormat format;
+    private final OperatorCopy copy;
 
     public ReportController(
             PortRegistry ports,
@@ -58,13 +60,15 @@ public class ReportController {
             MetricCatalog catalog,
             MetricQueryService metrics,
             BenchmarkService benchmarks,
-            MetricFormat format) {
+            MetricFormat format,
+            OperatorCopy copy) {
         this.ports = ports;
         this.incidents = incidents;
         this.catalog = catalog;
         this.metrics = metrics;
         this.benchmarks = benchmarks;
         this.format = format;
+        this.copy = copy;
     }
 
     /**
@@ -106,7 +110,7 @@ public class ReportController {
         String reader = canonicalPersona(persona);
         // Triage priority, not detection order. A brief is read top-down and stops being read
         // somewhere in the middle, so the most urgent incident has to be first.
-        List<Incident> open = incidents.openIncidents().stream()
+        List<Incident> open = copy.incidents(incidents.openIncidents()).stream()
                 .sorted(Comparator.comparingInt(Incident::priority)
                         .thenComparing(Incident::id))
                 .toList();

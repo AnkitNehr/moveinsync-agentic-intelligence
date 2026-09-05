@@ -1,0 +1,124 @@
+# Column meanings transcribed from data/dictionary/*.md.
+# The catalog metrics are derived; this file is the operator glossary for source columns
+# and the grains they are sliced on. Keep wording aligned with the hackathon dictionaries.
+columns:
+  - id: business_unit
+    table: ride_data_trip
+    label: business unit
+    meaning: Client account / business unit operating the fleet
+  - id: office
+    table: ride_data_trip
+    label: office
+    meaning: Office or site the trip serves
+  - id: product_type
+    table: ride_data_trip
+    label: vehicle type
+    meaning: Trip service type (CAB, BUS, SPOT_2.0)
+  - id: shift_type
+    table: ride_data_trip
+    label: shift
+    meaning: Employee shift this trip is scheduled for (shift-start clock time)
+  - id: trip_direction
+    table: ride_data_trip
+    label: trip direction
+    meaning: Login (pickup) or logout (drop) leg
+  - id: trip_nodal
+    table: ride_data_trip
+    label: pickup type
+    meaning: Nodal point or hub associated with the trip (NODAL, HOME, SHUTTLE; null on home trips)
+  - id: route_source
+    table: ride_data_trip
+    label: route source
+    meaning: System that generated the route (AUTO, MANUAL, RENTLZ, SHUTTLE_SERVICE)
+  - id: vendor_id
+    table: ride_data_trip
+    label: vendor
+    meaning: Cab vendor identifier
+  - id: vendor
+    table: bill_data
+    label: vendor
+    meaning: Cab vendor being billed
+  - id: actual_escort
+    table: ride_data_trip
+    label: escort present
+    meaning: Whether an escort was actually present on the trip
+  - id: delay_minutes
+    table: ride_data_trip
+    label: delay
+    meaning: Delay duration in minutes
+  - id: delay_reason
+    table: ride_data_trip
+    label: delay reason
+    meaning: Reason recorded for the delay, if any (NODELAY, TRAFFIC, DRIVER, EMPLOYEE)
+  - id: is_driver_nc
+    table: ride_data_trip
+    label: driver non-compliance flag
+    meaning: Whether the driver was flagged non-compliant
+  - id: is_cab_nc
+    table: ride_data_trip
+    label: cab non-compliance flag
+    meaning: Whether the cab was flagged non-compliant
+  - id: actual_cab_capacity
+    table: ride_data_trip
+    label: cab capacity
+    meaning: Seating capacity of the cab that ran the trip
+  - id: plannedemployee_cnt
+    table: ride_data_trip
+    label: planned riders
+    meaning: Number of employees planned on the trip
+  - id: actualemployee_cnt
+    table: ride_data_trip
+    label: boarded riders
+    meaning: Number of employees who actually boarded
+  - id: noshow_cnt
+    table: ride_data_trip
+    label: no-shows
+    meaning: Number of employees who did not show up
+  - id: actual_cab_fuel_type
+    table: ride_data_trip
+    label: fuel type
+    meaning: Fuel type of the cab that ran the trip
+  - id: fuel_type
+    table: ride_data_trip
+    label: fuel type
+    meaning: Fuel type of the cab that ran the trip
+  - id: trip_cost
+    table: bill_data
+    label: trip cost
+    meaning: Billed cost for the trip
+  - id: total_trip_km
+    table: bill_data
+    label: billed kilometres
+    meaning: Distance billed for the trip, in kilometers (0.0 is common on fixed-rate contracts)
+  - id: slab_name
+    table: bill_data
+    label: billing slab
+    meaning: Billing slab or tier applied to the trip
+  - id: contract
+    table: bill_data
+    label: contract
+    meaning: Contract type or name governing the billing rate
+  - id: billing_regime
+    table: bill_data
+    label: contract type
+    meaning: How the trip is priced (distance-based vs fixed-rate)
+  - id: noshow
+    table: trips
+    label: no-shows
+    meaning: Number of employees who did not show up (from noshow_cnt on ride_data_trip)
+  - id: emp_planned
+    table: trips
+    label: planned riders
+    meaning: Number of employees planned on the trip (from plannedemployee_cnt)
+  - id: emp_actual
+    table: trips
+    label: boarded riders
+    meaning: Number of employees who actually boarded (from actualemployee_cnt)
+  - id: cab_capacity
+    table: trips
+    label: cab capacity
+    meaning: Seating capacity of the cab that ran the trip (from actual_cab_capacity)
+  - id: on_time
+    table: trips
+    label: on-time flag
+    meaning: Whether the trip arrived within the grace window, derived from delay_minutes on ride_data_trip

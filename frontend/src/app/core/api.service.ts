@@ -7,6 +7,7 @@ import type {
   Communication,
   EscalateResponse,
   FollowUp,
+  Glossary,
   Health,
   Incident,
   LatestRun,
@@ -227,6 +228,10 @@ export class ApiService {
 
   metricCatalog(): Promise<MetricSummary[]> {
     return this.request<MetricSummary[]>('/metrics');
+  }
+
+  glossary(): Promise<Glossary> {
+    return this.request<Glossary>('/glossary');
   }
 
   /** One fully contextualised observation, with trend / SLA / peer / industry frames. */
